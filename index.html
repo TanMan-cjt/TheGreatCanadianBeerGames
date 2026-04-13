@@ -5,59 +5,119 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Game Lobby Display</title>
   <style>
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-      background: white;
-      color: black;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 40px 20px;
+    * {
       box-sizing: border-box;
     }
 
-    h1 {
-      margin-bottom: 10px;
-      font-size: 3rem;
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+      background: black;
+      color: white;
     }
 
-    p {
-      margin-top: 0;
-      margin-bottom: 30px;
+    body {
+      position: relative;
+    }
+
+    .video-background {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      z-index: 0;
+      overflow: hidden;
+      background: black;
+    }
+
+    .video-background video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .content-layer {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 40px 0 40px 40px;
+    }
+
+    .left-panel {
+      width: 42%;
+      max-width: 700px;
+      min-width: 320px;
+      height: calc(100vh - 80px);
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      padding: 30px;
+      border-radius: 24px;
+      background: rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+    }
+
+    h1 {
+      margin: 0 0 10px 0;
+      font-size: 3rem;
+      line-height: 1.1;
+    }
+
+    .subheading {
+      margin: 0 0 30px 0;
       font-size: 1.2rem;
+      color: rgba(255, 255, 255, 0.85);
     }
 
     #userList {
-      width: 100%;
-      max-width: 700px;
       list-style: none;
       padding: 0;
       margin: 0;
+      overflow-y: auto;
+      flex: 1;
     }
 
     #userList li {
-      border: 1px solid #ddd;
-      border-radius: 12px;
-      padding: 18px 22px;
       margin-bottom: 14px;
+      padding: 18px 22px;
+      border-radius: 16px;
       font-size: 1.5rem;
-      background: #fafafa;
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: white;
     }
 
-    .empty {
-      color: #666;
+    #userList li.empty {
       font-style: italic;
-      font-size: 1.2rem;
+      color: rgba(255, 255, 255, 0.75);
     }
   </style>
 </head>
 <body>
-  <h1>Players Joined</h1>
-  <p>Live lobby screen</p>
+  <div class="video-background">
+    <video autoplay muted loop playsinline>
+      <source src="content/videos/playerLobbyBackground.mov" type="video/mp4" />
+      Your browser does not support the video tag.
+    </video>
+  </div>
 
-  <ul id="userList"></ul>
+  <div class="content-layer">
+    <div class="left-panel">
+      <h1>Players Joined</h1>
+      <p class="subheading">Live lobby screen</p>
+      <ul id="userList"></ul>
+    </div>
+  </div>
 
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
@@ -93,7 +153,6 @@
       }
 
       const players = Object.values(data);
-
       players.sort((a, b) => a.joinedAt - b.joinedAt);
 
       players.forEach((player) => {
