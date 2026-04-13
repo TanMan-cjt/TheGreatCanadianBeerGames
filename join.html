@@ -59,10 +59,16 @@
       background: black;
       color: white;
       cursor: pointer;
+      margin-bottom: 10px;
     }
 
     button:hover {
       opacity: 0.9;
+    }
+
+    .secondary {
+      background: #e9e9e9;
+      color: black;
     }
 
     #status {
@@ -78,15 +84,38 @@
     .error {
       color: red;
     }
+
+    .hidden {
+      display: none;
+    }
+
+    #joinedPanel {
+      text-align: center;
+    }
+
+    #joinedName {
+      font-weight: bold;
+      font-size: 1.2rem;
+      margin-bottom: 18px;
+    }
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>Join the Game</h1>
-    <p>Enter your username to join</p>
+    <div id="joinPanel">
+      <h1>Join the Game</h1>
+      <p>Enter your username to join</p>
 
-    <input id="usernameInput" type="text" placeholder="Username" maxlength="20" />
-    <button id="joinBtn">Join</button>
+      <input id="usernameInput" type="text" placeholder="Username" maxlength="20" />
+      <button id="joinBtn">Join</button>
+    </div>
+
+    <div id="joinedPanel" class="hidden">
+      <h1>You’re In</h1>
+      <p id="joinedName"></p>
+      <button id="refreshBtn">Refresh My Status</button>
+      <button id="leaveBtn" class="secondary">Leave Game</button>
+    </div>
 
     <div id="status"></div>
   </div>
@@ -96,9 +125,10 @@
     import {
       getDatabase,
       ref,
-      push,
+      set,
       get,
-      child
+      child,
+      remove
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
     const firebaseConfig = {
@@ -118,47 +148,168 @@
     const joinBtn = document.getElementById("joinBtn");
     const status = document.getElementById("status");
 
+    const joinPanel = document.getElementById("joinPanel");
+    const joinedPanel = document.getElementById("joinedPanel");
+    const joinedName = document.getElementById("joinedName");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const leaveBtn = document.getElementById("leaveBtn");
+
+    function generatePlayerId() {
+      return "player_" + crypto.randomUUID();
+    }
+
+    function setStatus(message, className = "") {
+      status.textContent = message;
+      status.className = className;
+    }
+
+    function showJoinedState(username) {
+      joinPanel.classList.add("hidden");
+      joinedPanel.classList.remove("hidden");
+      joinedName.textContent = `Joined as ${username}`;
+    }
+
+    function showJoinState() {
+      joinedPanel.classList.add("hidden");
+      joinPanel.classList.remove("hidden");
+    }
+
+    async function findDuplicateUsername(username, currentPlayerId = null) {
+      const snapshot = await get(ref(db, "lobby/players"));
+      const players = snapshot.val() || {};
+
+      return Object.entries(players).some(([playerId, player]) => {
+        if (playerId === currentPlayerId) return false;
+        return (player.username || "").toLowerCase() === username.toLowerCase();
+      });
+    }
+
+    async function restoreExistingPlayer() {
+      const savedPlayerId = localStorage.getItem("playerId");
+      const savedUsername = localStorage.getItem("joinedUsername");
+
+      if (!savedPlayerId || !savedUsername) {
+        showJoinState();
+        return;
+      }
+
+      try {
+        const playerRef = ref(db, `lobby/players/${savedPlayerId}`);
+        const snapshot = await get(playerRef);
+
+        if (snapshot.exists()) {
+          const player = snapshot.val();
+          showJoinedState(player.username || savedUsername);
+          setStatus("You are still connected to this game.", "success");
+        } else {
+          await set(playerRef, {
+            username: savedUsername,
+            joinedAt: Date.now()
+          });
+
+          showJoinedState(savedUsername);
+          setStatus("Reconnected to the game.", "success");
+        }
+      } catch (error) {
+        console.error(error);
+        setStatus("Could not restore your session.", "error");
+        showJoinState();
+      }
+    }
+
     async function joinGame() {
       const rawName = usernameInput.value.trim();
       const username = rawName.replace(/\s+/g, " ");
 
       if (!username) {
-        status.textContent = "Please enter a username.";
-        status.className = "error";
+        setStatus("Please enter a username.", "error");
         return;
       }
 
       try {
-        const playersRef = ref(db, "lobby/players");
-        const snapshot = await get(playersRef);
-        const existingPlayers = snapshot.val() || {};
+        let playerId = localStorage.getItem("playerId");
 
-        const duplicate = Object.values(existingPlayers).some(
-          (player) => player.username.toLowerCase() === username.toLowerCase()
-        );
+        if (!playerId) {
+          playerId = generatePlayerId();
+          localStorage.setItem("playerId", playerId);
+        }
+
+        const duplicate = await findDuplicateUsername(username, playerId);
 
         if (duplicate) {
-          status.textContent = "That username is already taken.";
-          status.className = "error";
+          setStatus("That username is already taken.", "error");
           return;
         }
 
-        await push(playersRef, {
+        await set(ref(db, `lobby/players/${playerId}`), {
           username,
           joinedAt: Date.now()
         });
 
         localStorage.setItem("joinedUsername", username);
 
-        status.textContent = `Joined as ${username}`;
-        status.className = "success";
-
+        showJoinedState(username);
+        setStatus(`Joined as ${username}`, "success");
         usernameInput.value = "";
       } catch (error) {
         console.error(error);
-        status.textContent = "Something went wrong while joining.";
-        status.className = "error";
+        setStatus("Something went wrong while joining.", "error");
       }
+    }
+
+    async function refreshStatus() {
+      const savedPlayerId = localStorage.getItem("playerId");
+      const savedUsername = localStorage.getItem("joinedUsername");
+
+      if (!savedPlayerId || !savedUsername) {
+        setStatus("No saved player session found.", "error");
+        showJoinState();
+        return;
+      }
+
+      try {
+        const snapshot = await get(ref(db, `lobby/players/${savedPlayerId}`));
+
+        if (snapshot.exists()) {
+          const player = snapshot.val();
+          showJoinedState(player.username || savedUsername);
+          setStatus("Your player is still active.", "success");
+        } else {
+          await set(ref(db, `lobby/players/${savedPlayerId}`), {
+            username: savedUsername,
+            joinedAt: Date.now()
+          });
+
+          showJoinedState(savedUsername);
+          setStatus("Your player was restored.", "success");
+        }
+      } catch (error) {
+        console.error(error);
+        setStatus("Could not refresh your status.", "error");
+      }
+    }
+
+    async function leaveGame() {
+      const savedPlayerId = localStorage.getItem("playerId");
+
+      if (!savedPlayerId) {
+        localStorage.removeItem("joinedUsername");
+        showJoinState();
+        setStatus("You have left the game.", "success");
+        return;
+      }
+
+      try {
+        await remove(ref(db, `lobby/players/${savedPlayerId}`));
+      } catch (error) {
+        console.error(error);
+      }
+
+      localStorage.removeItem("playerId");
+      localStorage.removeItem("joinedUsername");
+
+      showJoinState();
+      setStatus("You have left the game.", "success");
     }
 
     joinBtn.addEventListener("click", joinGame);
@@ -168,6 +319,11 @@
         joinGame();
       }
     });
+
+    refreshBtn.addEventListener("click", refreshStatus);
+    leaveBtn.addEventListener("click", leaveGame);
+
+    restoreExistingPlayer();
   </script>
 </body>
 </html>
