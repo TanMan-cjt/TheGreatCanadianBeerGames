@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Assignment</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      font-family: Arial, sans-serif;
+      background: black;
+      color: white;
+      overflow: hidden;
+    }
+
+    body {
+      position: relative;
+    }
+
+    .page {
+      position: relative;
+      z-index: 1;
+      width: 100vw;
+      height: 100vh;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 24px;
+      padding: 24px;
+    }
+
+    .players-panel {
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 24px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+
+    .players-panel h2 {
+      margin: 0 0 14px 0;
+      font-size: 1.6rem;
+    }
+
+    .players-list {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding-right: 6px;
+    }
+
+    .player-tile {
+      width: 100%;
+      min-width: 0;
+      padding: 10px 14px;
+      border-radius: 16px;
+      font-size: 1.05rem;
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: white;
+      display: flex;
+      align-items: center;
+      height: 64px;
+      position: relative;
+      gap: 12px;
+      cursor: grab;
+      user-select: none;
+    }
+
+    .player-tile.dragging {
+      opacity: 0.5;
+    }
+
+    .player-photo {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      object-fit: cover;
+      flex: 0 0 42px;
+      border: 1px solid rgba(255,255,255,0.22);
+      background: rgba(255,255,255,0.12);
+    }
+
+    .player-photo.placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+    }
+
+    .player-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 1rem;
+    }
+
+    .teams-area {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 22px;
+      align-items: stretch;
+    }
+
+    .team-column {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 24px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 0;
+    }
+
+    .captain-photo {
+      width: 15vh;
+      height: 15vh;
+      min-width: 100px;
+      min-height: 100px;
+      max-width: 170px;
+      max-height: 170px;
+      border-radius: 20px;
+      object-fit: cover;
+      border: 2px solid rgba(255,255,255,0.2);
+      background: rgba(255,255,255,0.12);
+    }
+
+    .captain-photo.placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      font-weight: bold;
+    }
+
+    .captain-name {
+      margin-top: 12px;
+      margin-bottom: 18px;
+      font-size: 1.2rem;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    .drop-zone {
+      width: 100%;
+      flex: 1;
+      min-height: 0;
+      background: #606060;
+      border-radius: 22px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      overflow-y: auto;
+      border: 2px solid transparent;
+      transition: border-color 0.15s ease, background 0.15s ease;
+    }
+
+    .drop-zone.active {
+      border-color: white;
+      background: #6d6d6d;
+    }
+
+    .drop-zone.full {
+      opacity: 0.8;
+    }
+
+    .drop-hint {
+      margin: auto;
+      text-align: center;
+      color: rgba(255,255,255,0.75);
+      font-size: 1rem;
+      padding: 12px;
+    }
+
+    .assigned-player {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 8px;
+      background: rgba(0,0,0,0.18);
+      border-radius: 18px;
+      padding: 14px 10px;
+      cursor: grab;
+      user-select: none;
+    }
+
+    .assigned-player.dragging {
+      opacity: 0.5;
+    }
+
+    .assigned-photo {
+      width: 11vh;
+      height: 11vh;
+      min-width: 78px;
+      min-height: 78px;
+      max-width: 130px;
+      max-height: 130px;
+      border-radius: 18px;
+      object-fit: cover;
+      border: 1px solid rgba(255,255,255,0.22);
+      background: rgba(255,255,255,0.10);
+    }
+
+    .assigned-photo.placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 1.5rem;
+    }
+
+    .assigned-name {
+      font-size: 1rem;
+      line-height: 1.2;
+      word-break: break-word;
+    }
+
+    #rolesButton {
+      position: fixed;
+      right: 40px;
+      bottom: 40px;
+      padding: 14px 22px;
+      border: none;
+      border-radius: 12px;
+      background: white;
+      color: black;
+      font-size: 2rem;
+      font-weight: bold;
+      cursor: pointer;
+      display: none;
+      z-index: 10;
+    }
+
+    #rolesButton:hover {
+      opacity: 0.92;
+    }
+
+    .transition-overlay {
+      position: fixed;
+      left: 0;
+      top: 100vh;
+      width: 100vw;
+      height: 100vh;
+      z-index: 999;
+      pointer-events: none;
+      overflow: hidden;
+      display: none;
+    }
+
+    .transition-overlay.show {
+      display: block;
+    }
+
+    .transition-overlay img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .transition-overlay.animate-in {
+      display: block;
+      animation: slideCoverUp 0.7s ease-in-out forwards;
+    }
+
+    .transition-overlay.animate-out {
+      animation: slideRevealDown 0.7s ease-in-out forwards;
+    }
+
+    @keyframes slideCoverUp {
+      from { top: 100vh; }
+      to { top: 0; }
+    }
+
+    @keyframes slideRevealDown {
+      from { top: 0; }
+      to { top: 100vh; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="players-panel">
+      <h2>Unassigned Players</h2>
+      <div id="playersList" class="players-list"></div>
+    </section>
+
+    <section id="teamsArea" class="teams-area"></section>
+  </div>
+
+  <button id="rolesButton">Roles →</button>
+
+  <div id="transitionOverlay" class="transition-overlay">
+    <img src="content/images/transition.png" alt="" />
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import {
+      getDatabase,
+      ref,
+      onValue,
+      get,
+      update,
+      set
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBrkSrV78Gvxl_h6cps8SG-yDW0-_zJA4A",
+      authDomain: "thegreatcanadianbeergames.firebaseapp.com",
+      projectId: "thegreatcanadianbeergames",
+      storageBucket: "thegreatcanadianbeergames.firebasestorage.app",
+      messagingSenderId: "676718255243",
+      appId: "1:676718255243:web:9cd17e90c246968198088e",
+      measurementId: "G-L8WR52ZM6X"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    const playersRef = ref(db, "lobby/players");
+    const lobbyRef = ref(db, "lobby");
+
+    const playersList = document.getElementById("playersList");
+    const teamsArea = document.getElementById("teamsArea");
+    const rolesButton = document.getElementById("rolesButton");
+    const transitionOverlay = document.getElementById("transitionOverlay");
+
+    let allPlayersMap = {};
+    let allPlayers = [];
+    let captains = [];
+    let unassignedPlayers = [];
+    let draggedPlayerId = null;
+    let isTransitioning = false;
+
+    function getInitial(name) {
+      return (name || "?").charAt(0).toUpperCase();
+    }
+
+    function makeSmallPhoto(player) {
+      if (player.photoDataUrl) {
+        const img = document.createElement("img");
+        img.className = "player-photo";
+        img.src = player.photoDataUrl;
+        img.alt = `${player.username} photo`;
+        return img;
+      }
+      const div = document.createElement("div");
+      div.className = "player-photo placeholder";
+      div.textContent = getInitial(player.username);
+      return div;
+    }
+
+    function makeBigPhoto(player, className = "captain-photo") {
+      if (player.photoDataUrl) {
+        const img = document.createElement("img");
+        img.className = className;
+        img.src = player.photoDataUrl;
+        img.alt = `${player.username} photo`;
+        return img;
+      }
+      const div = document.createElement("div");
+      div.className = `${className} placeholder`;
+      div.textContent = getInitial(player.username);
+      return div;
+    }
+
+    function getAssignedPlayersForCaptain(captainId) {
+      return allPlayers
+        .filter(player => !player.isCaptain && player.teamCaptainId === captainId)
+        .sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
+    }
+
+    function canDropIntoCaptain(captainId) {
+      return getAssignedPlayersForCaptain(captainId).length < 3;
+    }
+
+    async function assignPlayerToCaptain(playerId, captainId) {
+      if (!canDropIntoCaptain(captainId)) return;
+      await update(ref(db, `lobby/players/${playerId}`), {
+        teamCaptainId: captainId
+      });
+    }
+
+    async function unassignPlayer(playerId) {
+      await update(ref(db, `lobby/players/${playerId}`), {
+        teamCaptainId: null
+      });
+    }
+
+    function renderUnassignedPlayers() {
+      playersList.innerHTML = "";
+
+      if (!unassignedPlayers.length) {
+        const hint = document.createElement("div");
+        hint.className = "drop-hint";
+        hint.textContent = "All players assigned";
+        playersList.appendChild(hint);
+        return;
+      }
+
+      unassignedPlayers.forEach(player => {
+        const tile = document.createElement("div");
+        tile.className = "player-tile";
+        tile.draggable = true;
+        tile.dataset.playerId = player.id;
+
+        tile.appendChild(makeSmallPhoto(player));
+
+        const name = document.createElement("div");
+        name.className = "player-name";
+        name.textContent = player.username;
+        tile.appendChild(name);
+
+        tile.addEventListener("dragstart", () => {
+          draggedPlayerId = player.id;
+          tile.classList.add("dragging");
+        });
+
+        tile.addEventListener("dragend", () => {
+          draggedPlayerId = null;
+          tile.classList.remove("dragging");
+        });
+
+        playersList.appendChild(tile);
+      });
+    }
+
+    function renderTeams() {
+      teamsArea.innerHTML = "";
+
+      captains.forEach(captain => {
+        const assignedPlayers = getAssignedPlayersForCaptain(captain.id);
+
+        const column = document.createElement("div");
+        column.className = "team-column";
+
+        column.appendChild(makeBigPhoto(captain, "captain-photo"));
+
+        const captainName = document.createElement("div");
+        captainName.className = "captain-name";
+        captainName.textContent = captain.username;
+        column.appendChild(captainName);
+
+        const dropZone = document.createElement("div");
+        dropZone.className = "drop-zone";
+        dropZone.dataset.captainId = captain.id;
+
+        if (assignedPlayers.length >= 3) {
+          dropZone.classList.add("full");
+        }
+
+        dropZone.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          if (draggedPlayerId && canDropIntoCaptain(captain.id)) {
+            dropZone.classList.add("active");
+          }
+        });
+
+        dropZone.addEventListener("dragleave", () => {
+          dropZone.classList.remove("active");
+        });
+
+        dropZone.addEventListener("drop", async (e) => {
+          e.preventDefault();
+          dropZone.classList.remove("active");
+          if (!draggedPlayerId) return;
+          await assignPlayerToCaptain(draggedPlayerId, captain.id);
+        });
+
+        if (!assignedPlayers.length) {
+          const hint = document.createElement("div");
+          hint.className = "drop-hint";
+          hint.textContent = "Drop players here";
+          dropZone.appendChild(hint);
+        } else {
+          assignedPlayers.forEach(player => {
+            const assigned = document.createElement("div");
+            assigned.className = "assigned-player";
+            assigned.draggable = true;
+            assigned.dataset.playerId = player.id;
+
+            assigned.appendChild(makeBigPhoto(player, "assigned-photo"));
+
+            const assignedName = document.createElement("div");
+            assignedName.className = "assigned-name";
+            assignedName.textContent = player.username;
+            assigned.appendChild(assignedName);
+
+            assigned.addEventListener("dragstart", () => {
+              draggedPlayerId = player.id;
+              assigned.classList.add("dragging");
+            });
+
+            assigned.addEventListener("dragend", () => {
+              draggedPlayerId = null;
+              assigned.classList.remove("dragging");
+            });
+
+            dropZone.appendChild(assigned);
+          });
+        }
+
+        column.appendChild(dropZone);
+        teamsArea.appendChild(column);
+      });
+    }
+
+    function updateRolesButton() {
+      const nonCaptainPlayers = allPlayers.filter(p => !p.isCaptain);
+      const allAssigned = nonCaptainPlayers.length > 0 &&
+        nonCaptainPlayers.every(p => !!p.teamCaptainId);
+
+      rolesButton.style.display = allAssigned ? "block" : "none";
+    }
+
+    function render() {
+      allPlayers = Object.entries(allPlayersMap).map(([id, player]) => ({ id, ...player }));
+      allPlayers.sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
+
+      captains = allPlayers.filter(player => player.isCaptain);
+      unassignedPlayers = allPlayers.filter(player => !player.isCaptain && !player.teamCaptainId);
+
+      renderUnassignedPlayers();
+      renderTeams();
+      updateRolesButton();
+    }
+
+    onValue(playersRef, (snapshot) => {
+      allPlayersMap = snapshot.val() || {};
+      render();
+    });
+
+    playersList.addEventListener("dragover", (e) => {
+      e.preventDefault();
+    });
+
+    playersList.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      if (!draggedPlayerId) return;
+      const player = allPlayers.find(p => p.id === draggedPlayerId);
+      if (!player || player.isCaptain) return;
+      await unassignPlayer(draggedPlayerId);
+    });
+
+    rolesButton.addEventListener("click", async () => {
+      if (isTransitioning) return;
+
+      const nonCaptainPlayers = allPlayers.filter(p => !p.isCaptain);
+      const allAssigned = nonCaptainPlayers.length > 0 &&
+        nonCaptainPlayers.every(p => !!p.teamCaptainId);
+
+      if (!allAssigned) return;
+
+      try {
+        await update(lobbyRef, {
+          assignmentLocked: true,
+          phase: "roles"
+        });
+
+        isTransitioning = true;
+        transitionOverlay.classList.remove("animate-out");
+        transitionOverlay.classList.add("show");
+        transitionOverlay.classList.add("animate-in");
+
+        setTimeout(() => {
+          window.location.href = "roles.html?transition=1";
+        }, 700);
+      } catch (error) {
+        console.error("Failed to lock assignment:", error);
+      }
+    });
+
+    const params = new URLSearchParams(window.location.search);
+
+    if (params.get("transition") === "1") {
+      transitionOverlay.classList.add("show");
+      transitionOverlay.style.top = "0";
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          transitionOverlay.classList.add("animate-out");
+        });
+      });
+
+      setTimeout(() => {
+        transitionOverlay.style.display = "none";
+        const cleanUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, cleanUrl);
+      }, 700);
+    }
+  </script>
+</body>
+</html>

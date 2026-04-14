@@ -40,7 +40,8 @@
       margin-bottom: 24px;
     }
 
-    input {
+    input[type="text"],
+    input[type="file"] {
       width: 100%;
       padding: 14px;
       font-size: 1rem;
@@ -48,6 +49,7 @@
       border-radius: 10px;
       box-sizing: border-box;
       margin-bottom: 14px;
+      background: white;
     }
 
     button {
@@ -98,6 +100,45 @@
       font-size: 1.2rem;
       margin-bottom: 18px;
     }
+
+    .captain-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+      padding: 10px 12px;
+      border: 1px solid #bbb;
+      border-radius: 10px;
+    }
+
+    .captain-row label {
+      margin: 0;
+      font-size: 0.98rem;
+    }
+
+    .photo-preview-wrap {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 14px;
+    }
+
+    .photo-preview {
+      width: 92px;
+      height: 92px;
+      border-radius: 16px;
+      border: 1px solid #ccc;
+      object-fit: cover;
+      background: #f3f3f3;
+      display: none;
+    }
+
+    .photo-note {
+      font-size: 0.88rem;
+      color: #666;
+      text-align: center;
+      margin-top: -4px;
+      margin-bottom: 14px;
+    }
   </style>
 </head>
 <body>
@@ -107,6 +148,24 @@
       <p>Enter your username to join</p>
 
       <input id="usernameInput" type="text" placeholder="Username" maxlength="20" />
+
+      <div class="captain-row">
+        <input id="captainCheckbox" type="checkbox" />
+        <label for="captainCheckbox">I am a team captain</label>
+      </div>
+
+      <input
+        id="photoInput"
+        type="file"
+        accept="image/*"
+        capture="environment"
+      />
+
+      <div class="photo-preview-wrap">
+        <img id="photoPreview" class="photo-preview" alt="Photo preview" />
+      </div>
+      <div class="photo-note">Choose a photo or take one. It will be cropped into a square.</div>
+
       <button id="joinBtn">Join</button>
     </div>
 
@@ -120,31 +179,57 @@
     <div id="status"></div>
   </div>
 
-  <script type="module">
+    <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
     import {
-      getDatabase,
-      ref,
-      set,
-      get,
-      child,
-      remove
+        getDatabase,
+        ref,
+        set,
+        get,
+        remove,
+        onValue,
+        update
     } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
     const firebaseConfig = {
-    apiKey: "AIzaSyBrkSrV78Gvxl_h6cps8SG-yDW0-_zJA4A",
-    authDomain: "thegreatcanadianbeergames.firebaseapp.com",
-    projectId: "thegreatcanadianbeergames",
-    storageBucket: "thegreatcanadianbeergames.firebasestorage.app",
-    messagingSenderId: "676718255243",
-    appId: "1:676718255243:web:9cd17e90c246968198088e",
-    measurementId: "G-L8WR52ZM6X"
+        apiKey: "AIzaSyBrkSrV78Gvxl_h6cps8SG-yDW0-_zJA4A",
+        authDomain: "thegreatcanadianbeergames.firebaseapp.com",
+        projectId: "thegreatcanadianbeergames",
+        storageBucket: "thegreatcanadianbeergames.firebasestorage.app",
+        messagingSenderId: "676718255243",
+        appId: "1:676718255243:web:9cd17e90c246968198088e",
+        measurementId: "G-L8WR52ZM6X"
     };
+
+    const ROLE_META = {
+        tank: {
+        label: "Tank",
+        color: "#24964c",
+        icon: "content/images/tank.png"
+        },
+        assassin: {
+        label: "Assassin",
+        color: "#b33333",
+        icon: "content/images/assassin.png"
+        },
+        medic: {
+        label: "Medic",
+        color: "#2b6fd8",
+        icon: "content/images/medic.png"
+        }
+    };
+
+    const ROLE_ORDER = ["tank", "assassin", "medic"];
+    const MAX_PLAYERS = 12;
+    const MAX_CAPTAINS = 3;
 
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
 
     const usernameInput = document.getElementById("usernameInput");
+    const captainCheckbox = document.getElementById("captainCheckbox");
+    const photoInput = document.getElementById("photoInput");
+    const photoPreview = document.getElementById("photoPreview");
     const joinBtn = document.getElementById("joinBtn");
     const status = document.getElementById("status");
 
@@ -153,177 +238,847 @@
     const joinedName = document.getElementById("joinedName");
     const refreshBtn = document.getElementById("refreshBtn");
     const leaveBtn = document.getElementById("leaveBtn");
+    const card = document.querySelector(".card");
+
+    let croppedPhotoDataUrl = "";
+    let playerWatcherUnsub = null;
+    let lobbyWatcherUnsub = null;
+    let currentLobbyPhase = "join";
+    let currentPlayerData = null;
+    let currentPlayerId = null;
+    let currentPlayersCache = {};
+    let captainRoleOrder = [];
+    let dragSourceIndex = null;
+    let touchSourceIndex = null;
 
     function generatePlayerId() {
-      return "player_" + crypto.randomUUID();
+        return "player_" + crypto.randomUUID();
     }
 
     function setStatus(message, className = "") {
-      status.textContent = message;
-      status.className = className;
+        status.textContent = message;
+        status.className = className;
     }
 
-    function showJoinedState(username) {
-      joinPanel.classList.add("hidden");
-      joinedPanel.classList.remove("hidden");
-      joinedName.textContent = `Joined as ${username}`;
+    function getInitial(name) {
+        return (name || "?").charAt(0).toUpperCase();
+    }
+
+    function ensureLivePanel() {
+        let panel = document.getElementById("liveStatusPanel");
+        if (!panel) {
+        panel = document.createElement("div");
+        panel.id = "liveStatusPanel";
+        panel.style.marginTop = "18px";
+        joinedPanel.appendChild(panel);
+        }
+        return panel;
+    }
+
+    function resetPhoneTheme() {
+        document.body.style.transition = "background 0.25s ease";
+        document.body.style.background = "white";
+        if (card) {
+        card.style.background = "#fff";
+        card.style.borderColor = "#ddd";
+        card.style.color = "black";
+        }
+        status.style.color = "";
+    }
+
+    function applyRoleTheme(roleKey) {
+        const role = ROLE_META[roleKey];
+        if (!role) {
+        resetPhoneTheme();
+        return;
+        }
+
+        document.body.style.transition = "background 0.25s ease";
+        document.body.style.background = role.color;
+
+        if (card) {
+        card.style.background = "rgba(255,255,255,0.94)";
+        card.style.borderColor = "rgba(255,255,255,0.45)";
+        card.style.color = "black";
+        }
+    }
+
+    function makePhotoElement(player, size) {
+        if (player?.photoDataUrl) {
+        const img = document.createElement("img");
+        img.src = player.photoDataUrl;
+        img.alt = `${player.username} photo`;
+        img.style.width = size;
+        img.style.height = size;
+        img.style.borderRadius = "18px";
+        img.style.objectFit = "cover";
+        img.style.display = "block";
+        img.style.background = "#eee";
+        img.style.border = "1px solid #ccc";
+        return img;
+        }
+
+        const div = document.createElement("div");
+        div.textContent = getInitial(player?.username || "?");
+        div.style.width = size;
+        div.style.height = size;
+        div.style.borderRadius = "18px";
+        div.style.display = "flex";
+        div.style.alignItems = "center";
+        div.style.justifyContent = "center";
+        div.style.fontWeight = "bold";
+        div.style.fontSize = "1.4rem";
+        div.style.background = "#eee";
+        div.style.border = "1px solid #ccc";
+        return div;
+    }
+
+    function showJoinedState(username, isCaptain = false) {
+        joinPanel.classList.add("hidden");
+        joinedPanel.classList.remove("hidden");
+        joinedName.textContent = isCaptain
+        ? `Joined as ${username} (Captain)`
+        : `Joined as ${username}`;
     }
 
     function showJoinState() {
-      joinedPanel.classList.add("hidden");
-      joinPanel.classList.remove("hidden");
+        joinedPanel.classList.add("hidden");
+        joinPanel.classList.remove("hidden");
+    }
+
+    async function getPlayers() {
+        const snapshot = await get(ref(db, "lobby/players"));
+        return snapshot.val() || {};
     }
 
     async function findDuplicateUsername(username, currentPlayerId = null) {
-      const snapshot = await get(ref(db, "lobby/players"));
-      const players = snapshot.val() || {};
-
-      return Object.entries(players).some(([playerId, player]) => {
+        const players = await getPlayers();
+        return Object.entries(players).some(([playerId, player]) => {
         if (playerId === currentPlayerId) return false;
         return (player.username || "").toLowerCase() === username.toLowerCase();
-      });
+        });
+    }
+
+    async function getCaptainCount() {
+        const players = await getPlayers();
+        return Object.values(players).filter(player => player.isCaptain === true).length;
+    }
+
+    function loadImageFromFile(file) {
+        return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = reject;
+            img.src = reader.result;
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+        });
+    }
+
+    function cropImageToSquareDataUrl(img, size = 180, quality = 0.82) {
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+
+        canvas.width = size;
+        canvas.height = size;
+
+        const side = Math.min(img.width, img.height);
+        const sx = (img.width - side) / 2;
+        const sy = (img.height - side) / 2;
+
+        ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+        return canvas.toDataURL("image/jpeg", quality);
+    }
+
+    async function handlePhotoSelection() {
+        const file = photoInput.files?.[0];
+        if (!file) {
+        croppedPhotoDataUrl = "";
+        photoPreview.style.display = "none";
+        photoPreview.removeAttribute("src");
+        return;
+        }
+
+        try {
+        const img = await loadImageFromFile(file);
+        croppedPhotoDataUrl = cropImageToSquareDataUrl(img, 180, 0.82);
+        photoPreview.src = croppedPhotoDataUrl;
+        photoPreview.style.display = "block";
+        setStatus("Photo ready.", "success");
+        } catch (error) {
+        console.error(error);
+        croppedPhotoDataUrl = "";
+        setStatus("Could not process that photo.", "error");
+        }
+    }
+
+    function getCaptainForPlayer(player) {
+        if (!player?.teamCaptainId) return null;
+        return currentPlayersCache[player.teamCaptainId] || null;
+    }
+
+    function getTeamMembersForCaptain(captainId) {
+        return Object.entries(currentPlayersCache)
+        .map(([id, player]) => ({ id, ...player }))
+        .filter(player => !player.isCaptain && player.teamCaptainId === captainId)
+        .sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
+    }
+
+    function getAssignedRoleForPlayer(player) {
+        if (!player) return null;
+        if (player.assignedRole) return player.assignedRole;
+
+        const captain = getCaptainForPlayer(player);
+        if (!captain?.roleAssignments) return null;
+
+        for (const roleKey of ROLE_ORDER) {
+        if (captain.roleAssignments[roleKey] === currentPlayerId) {
+            return roleKey;
+        }
+        }
+        return null;
+    }
+
+    function renderAssignmentWaiting(player, panel) {
+        panel.innerHTML = "";
+
+        if (player.isCaptain) {
+        const title = document.createElement("p");
+        title.textContent = "You are a team captain.";
+        title.style.fontWeight = "bold";
+        title.style.fontSize = "1.1rem";
+        title.style.textAlign = "center";
+        panel.appendChild(title);
+        return;
+        }
+
+        if (!player.teamCaptainId) {
+        const waiting = document.createElement("p");
+        waiting.textContent = "Awaiting team assignment";
+        waiting.style.fontWeight = "bold";
+        waiting.style.fontSize = "1.15rem";
+        waiting.style.textAlign = "center";
+        panel.appendChild(waiting);
+        return;
+        }
+
+        const captain = getCaptainForPlayer(player);
+        if (!captain) {
+        const waiting = document.createElement("p");
+        waiting.textContent = "Awaiting team assignment";
+        waiting.style.fontWeight = "bold";
+        waiting.style.textAlign = "center";
+        panel.appendChild(waiting);
+        return;
+        }
+
+        const title = document.createElement("p");
+        title.textContent = "You are Team:";
+        title.style.fontWeight = "bold";
+        title.style.fontSize = "1.1rem";
+        title.style.textAlign = "center";
+        title.style.marginBottom = "12px";
+        panel.appendChild(title);
+
+        const photo = makePhotoElement(captain, "104px");
+        photo.style.margin = "0 auto 10px auto";
+        panel.appendChild(photo);
+
+        const name = document.createElement("div");
+        name.textContent = captain.username;
+        name.style.fontWeight = "bold";
+        name.style.textAlign = "center";
+        panel.appendChild(name);
+    }
+
+    function normalizeCaptainRoleOrder(captain, teamMembers) {
+        const memberIds = teamMembers.map(player => player.id);
+        const savedAssignments = captain.roleAssignments || {};
+        const savedOrder = ROLE_ORDER.map(roleKey => savedAssignments[roleKey]).filter(Boolean);
+
+        const savedValid =
+        savedOrder.length === 3 &&
+        memberIds.every(id => savedOrder.includes(id));
+
+        if (savedValid) {
+        captainRoleOrder = ROLE_ORDER.map(roleKey => savedAssignments[roleKey]);
+        return;
+        }
+
+        const localValid =
+        captainRoleOrder.length === 3 &&
+        memberIds.every(id => captainRoleOrder.includes(id));
+
+        if (localValid) {
+        return;
+        }
+
+        captainRoleOrder = [...memberIds];
+    }
+
+    function swapCaptainSlots(a, b) {
+        if (a === null || b === null || a === b) return;
+        const next = [...captainRoleOrder];
+        [next[a], next[b]] = [next[b], next[a]];
+        captainRoleOrder = next;
+        renderLivePlayerStatus(currentPlayerData, currentLobbyPhase);
+    }
+
+    async function submitCaptainRoles(captain, teamMembers) {
+        if (captain.rolesLocked) return;
+        if (captainRoleOrder.length !== 3) return;
+
+        const assignments = {
+        tank: captainRoleOrder[0],
+        assassin: captainRoleOrder[1],
+        medic: captainRoleOrder[2]
+        };
+
+        const validTeamIds = teamMembers.map(player => player.id);
+        const valid =
+        validTeamIds.length === 3 &&
+        validTeamIds.every(id => captainRoleOrder.includes(id));
+
+        if (!valid) {
+        setStatus("Your team is not ready yet.", "error");
+        return;
+        }
+
+        const updates = {};
+        updates[`lobby/players/${captain.id}/roleAssignments`] = assignments;
+        updates[`lobby/players/${captain.id}/rolesLocked`] = true;
+
+        ROLE_ORDER.forEach((roleKey, index) => {
+        const playerId = captainRoleOrder[index];
+        updates[`lobby/players/${playerId}/assignedRole`] = roleKey;
+        });
+
+        try {
+        await update(ref(db), updates);
+        setStatus("Roles submitted.", "success");
+        } catch (error) {
+        console.error(error);
+        setStatus("Could not submit roles.", "error");
+        }
+    }
+
+    function renderCaptainRolesLocked(captain, teamMembers, panel) {
+        panel.innerHTML = "";
+
+        const title = document.createElement("div");
+        title.textContent = "Roles submitted";
+        title.style.fontWeight = "bold";
+        title.style.fontSize = "1.15rem";
+        title.style.textAlign = "center";
+        title.style.marginBottom = "14px";
+        panel.appendChild(title);
+
+        ROLE_ORDER.forEach(roleKey => {
+        const playerId = captain.roleAssignments?.[roleKey];
+        const player = playerId ? currentPlayersCache[playerId] : null;
+
+        const row = document.createElement("div");
+        row.style.display = "grid";
+        row.style.gridTemplateColumns = "70px 1fr";
+        row.style.gap = "10px";
+        row.style.alignItems = "center";
+        row.style.marginBottom = "12px";
+        row.style.padding = "10px";
+        row.style.border = "1px solid #ddd";
+        row.style.borderRadius = "14px";
+        row.style.background = "#fafafa";
+
+        const icon = document.createElement("img");
+        icon.src = ROLE_META[roleKey].icon;
+        icon.alt = ROLE_META[roleKey].label;
+        icon.style.width = "64px";
+        icon.style.height = "64px";
+        icon.style.objectFit = "contain";
+        icon.style.borderRadius = "14px";
+        icon.style.background = ROLE_META[roleKey].color;
+        icon.style.padding = "6px";
+        row.appendChild(icon);
+
+        const textWrap = document.createElement("div");
+
+        const roleName = document.createElement("div");
+        roleName.textContent = ROLE_META[roleKey].label;
+        roleName.style.fontWeight = "bold";
+        roleName.style.marginBottom = "4px";
+        textWrap.appendChild(roleName);
+
+        const playerName = document.createElement("div");
+        playerName.textContent = player?.username || "—";
+        textWrap.appendChild(playerName);
+
+        row.appendChild(textWrap);
+        panel.appendChild(row);
+        });
+    }
+
+    function renderCaptainRoleAssignment(player, panel) {
+        const captain = { id: currentPlayerId, ...player };
+        const teamMembers = getTeamMembersForCaptain(captain.id);
+
+        panel.innerHTML = "";
+
+        const title = document.createElement("div");
+        title.textContent = "Assign Roles";
+        title.style.fontWeight = "bold";
+        title.style.fontSize = "1.15rem";
+        title.style.textAlign = "center";
+        title.style.marginBottom = "14px";
+        panel.appendChild(title);
+
+        if (teamMembers.length !== 3) {
+        const wait = document.createElement("div");
+        wait.textContent = "Waiting for your full team...";
+        wait.style.textAlign = "center";
+        wait.style.fontWeight = "bold";
+        panel.appendChild(wait);
+        return;
+        }
+
+        normalizeCaptainRoleOrder(captain, teamMembers);
+
+        if (captain.rolesLocked) {
+        renderCaptainRolesLocked(captain, teamMembers, panel);
+        return;
+        }
+
+        const instructions = document.createElement("div");
+        instructions.textContent = "Reorder your 3 players so each row matches the role icon on the right.";
+        instructions.style.fontSize = "0.92rem";
+        instructions.style.color = "#555";
+        instructions.style.textAlign = "center";
+        instructions.style.marginBottom = "12px";
+        panel.appendChild(instructions);
+
+        const wrap = document.createElement("div");
+        wrap.style.display = "grid";
+        wrap.style.gridTemplateColumns = "1fr";
+        wrap.style.gap = "10px";
+
+        ROLE_ORDER.forEach((roleKey, index) => {
+        const memberId = captainRoleOrder[index];
+        const member = currentPlayersCache[memberId];
+
+        const row = document.createElement("div");
+        row.style.display = "grid";
+        row.style.gridTemplateColumns = "1fr 28px 76px";
+        row.style.gap = "10px";
+        row.style.alignItems = "center";
+
+        const slot = document.createElement("div");
+        slot.className = "captain-role-slot";
+        slot.dataset.index = index;
+        slot.draggable = true;
+        slot.style.border = "1px solid #ccc";
+        slot.style.borderRadius = "16px";
+        slot.style.padding = "10px";
+        slot.style.background = "#fafafa";
+        slot.style.display = "flex";
+        slot.style.alignItems = "center";
+        slot.style.gap = "10px";
+        slot.style.minHeight = "78px";
+        slot.style.cursor = "grab";
+        slot.style.userSelect = "none";
+
+        const photo = makePhotoElement(member, "56px");
+        photo.style.borderRadius = "14px";
+        slot.appendChild(photo);
+
+        const slotText = document.createElement("div");
+        slotText.style.minWidth = "0";
+
+        const slotName = document.createElement("div");
+        slotName.textContent = member?.username || "—";
+        slotName.style.fontWeight = "bold";
+        slotName.style.fontSize = "0.95rem";
+        slotName.style.wordBreak = "break-word";
+        slotText.appendChild(slotName);
+
+        slot.appendChild(slotText);
+
+        slot.addEventListener("dragstart", () => {
+            dragSourceIndex = index;
+        });
+
+        slot.addEventListener("dragover", (e) => {
+            e.preventDefault();
+        });
+
+        slot.addEventListener("drop", (e) => {
+            e.preventDefault();
+            if (dragSourceIndex === null) return;
+            swapCaptainSlots(dragSourceIndex, index);
+            dragSourceIndex = null;
+        });
+
+        slot.addEventListener("dragend", () => {
+            dragSourceIndex = null;
+        });
+
+        slot.addEventListener("touchstart", () => {
+            touchSourceIndex = index;
+        }, { passive: true });
+
+        slot.addEventListener("touchend", (e) => {
+            if (touchSourceIndex === null) return;
+            const touch = e.changedTouches[0];
+            const target = document.elementFromPoint(touch.clientX, touch.clientY)?.closest(".captain-role-slot");
+            if (target) {
+            const targetIndex = Number(target.dataset.index);
+            swapCaptainSlots(touchSourceIndex, targetIndex);
+            }
+            touchSourceIndex = null;
+        }, { passive: true });
+
+        row.appendChild(slot);
+
+        const arrow = document.createElement("div");
+        arrow.textContent = "→";
+        arrow.style.textAlign = "center";
+        arrow.style.fontSize = "1.3rem";
+        arrow.style.fontWeight = "bold";
+        row.appendChild(arrow);
+
+        const roleBox = document.createElement("div");
+        roleBox.style.height = "76px";
+        roleBox.style.borderRadius = "16px";
+        roleBox.style.display = "flex";
+        roleBox.style.alignItems = "center";
+        roleBox.style.justifyContent = "center";
+        roleBox.style.background = ROLE_META[roleKey].color;
+        roleBox.style.padding = "6px";
+
+        const icon = document.createElement("img");
+        icon.src = ROLE_META[roleKey].icon;
+        icon.alt = ROLE_META[roleKey].label;
+        icon.style.width = "58px";
+        icon.style.height = "58px";
+        icon.style.objectFit = "contain";
+        icon.style.borderRadius = "12px";
+        roleBox.appendChild(icon);
+
+        row.appendChild(roleBox);
+
+        wrap.appendChild(row);
+        });
+
+        panel.appendChild(wrap);
+
+        const submitBtn = document.createElement("button");
+        submitBtn.textContent = "Submit";
+        submitBtn.style.marginTop = "16px";
+        submitBtn.style.width = "100%";
+        submitBtn.style.padding = "14px";
+        submitBtn.style.fontSize = "1rem";
+        submitBtn.style.border = "none";
+        submitBtn.style.borderRadius = "12px";
+        submitBtn.style.background = "black";
+        submitBtn.style.color = "white";
+        submitBtn.style.cursor = "pointer";
+        submitBtn.addEventListener("click", () => submitCaptainRoles(captain, teamMembers));
+        panel.appendChild(submitBtn);
+    }
+
+    function renderPlayerRoleResult(player, panel) {
+        panel.innerHTML = "";
+
+        const assignedRole = getAssignedRoleForPlayer(player);
+        const captain = getCaptainForPlayer(player);
+
+        if (!assignedRole) {
+        resetPhoneTheme();
+
+        const waiting = document.createElement("div");
+        waiting.textContent = "Captain is assigning roles";
+        waiting.style.fontWeight = "bold";
+        waiting.style.fontSize = "1.1rem";
+        waiting.style.textAlign = "center";
+        panel.appendChild(waiting);
+        return;
+        }
+
+        applyRoleTheme(assignedRole);
+
+        const title = document.createElement("div");
+        title.textContent = `You are the ${ROLE_META[assignedRole].label}`;
+        title.style.fontWeight = "bold";
+        title.style.fontSize = "1.25rem";
+        title.style.textAlign = "center";
+        title.style.marginBottom = "16px";
+        panel.appendChild(title);
+
+        const icon = document.createElement("img");
+        icon.src = ROLE_META[assignedRole].icon;
+        icon.alt = ROLE_META[assignedRole].label;
+        icon.style.width = "110px";
+        icon.style.height = "110px";
+        icon.style.objectFit = "contain";
+        icon.style.display = "block";
+        icon.style.margin = "0 auto 12px auto";
+        panel.appendChild(icon);
+
+        if (captain) {
+        const teamText = document.createElement("div");
+        teamText.textContent = `Team ${captain.username}`;
+        teamText.style.textAlign = "center";
+        teamText.style.fontWeight = "bold";
+        panel.appendChild(teamText);
+        }
+    }
+
+    function renderLivePlayerStatus(player, phase) {
+        const panel = ensureLivePanel();
+
+        if (!player) {
+        resetPhoneTheme();
+        panel.innerHTML = "";
+        return;
+        }
+
+        if (phase === "assignment") {
+        resetPhoneTheme();
+        renderAssignmentWaiting(player, panel);
+        return;
+        }
+
+        if (phase === "roles") {
+        if (player.isCaptain) {
+            resetPhoneTheme();
+            renderCaptainRoleAssignment(player, panel);
+        } else {
+            renderPlayerRoleResult(player, panel);
+        }
+        return;
+        }
+
+        if (phase === "game1") {
+        const assignedRole = getAssignedRoleForPlayer(player);
+        if (assignedRole) {
+            applyRoleTheme(assignedRole);
+        } else {
+            resetPhoneTheme();
+        }
+
+        panel.innerHTML = "";
+        const title = document.createElement("div");
+        title.textContent = "Game is starting";
+        title.style.fontWeight = "bold";
+        title.style.fontSize = "1.2rem";
+        title.style.textAlign = "center";
+        panel.appendChild(title);
+        return;
+        }
+
+        resetPhoneTheme();
+        panel.innerHTML = "";
+    }
+
+    function startRealtimeWatchers(playerId) {
+        currentPlayerId = playerId;
+
+        if (playerWatcherUnsub) playerWatcherUnsub();
+        if (lobbyWatcherUnsub) lobbyWatcherUnsub();
+
+        playerWatcherUnsub = onValue(ref(db, "lobby/players"), (snapshot) => {
+        currentPlayersCache = snapshot.val() || {};
+        const me = currentPlayersCache[playerId] || null;
+        currentPlayerData = me;
+
+        if (me) {
+            showJoinedState(me.username, !!me.isCaptain);
+            renderLivePlayerStatus(me, currentLobbyPhase);
+        }
+        });
+
+        lobbyWatcherUnsub = onValue(ref(db, "lobby/phase"), (snapshot) => {
+        currentLobbyPhase = snapshot.val() || "join";
+        renderLivePlayerStatus(currentPlayerData, currentLobbyPhase);
+        });
     }
 
     async function restoreExistingPlayer() {
-      const savedPlayerId = localStorage.getItem("playerId");
-      const savedUsername = localStorage.getItem("joinedUsername");
+        const savedPlayerId = localStorage.getItem("playerId");
+        const savedUsername = localStorage.getItem("joinedUsername");
 
-      if (!savedPlayerId || !savedUsername) {
+        if (!savedPlayerId || !savedUsername) {
         showJoinState();
         return;
-      }
+        }
 
-      try {
+        try {
         const playerRef = ref(db, `lobby/players/${savedPlayerId}`);
         const snapshot = await get(playerRef);
 
         if (snapshot.exists()) {
-          const player = snapshot.val();
-          showJoinedState(player.username || savedUsername);
-          setStatus("You are still connected to this game.", "success");
+            const player = snapshot.val();
+            showJoinedState(player.username || savedUsername, !!player.isCaptain);
+            setStatus("You are still connected to this game.", "success");
+            startRealtimeWatchers(savedPlayerId);
         } else {
-          await set(playerRef, {
-            username: savedUsername,
-            joinedAt: Date.now()
-          });
-
-          showJoinedState(savedUsername);
-          setStatus("Reconnected to the game.", "success");
+            localStorage.removeItem("playerId");
+            localStorage.removeItem("joinedUsername");
+            localStorage.removeItem("joinedIsCaptain");
+            showJoinState();
         }
-      } catch (error) {
+        } catch (error) {
         console.error(error);
         setStatus("Could not restore your session.", "error");
         showJoinState();
-      }
+        }
     }
 
     async function joinGame() {
-      const rawName = usernameInput.value.trim();
-      const username = rawName.replace(/\s+/g, " ");
+        const rawName = usernameInput.value.trim();
+        const username = rawName.replace(/\s+/g, " ");
+        const wantsCaptain = captainCheckbox.checked;
 
-      if (!username) {
+        if (!username) {
         setStatus("Please enter a username.", "error");
         return;
-      }
-
-      try {
-        let playerId = localStorage.getItem("playerId");
-
-        if (!playerId) {
-          playerId = generatePlayerId();
-          localStorage.setItem("playerId", playerId);
         }
 
-        const duplicate = await findDuplicateUsername(username, playerId);
+        try {
+        const players = await getPlayers();
+        const playerCount = Object.keys(players).length;
 
+        if (playerCount >= MAX_PLAYERS) {
+            setStatus("The lobby is full.", "error");
+            return;
+        }
+
+        const duplicate = await findDuplicateUsername(username);
         if (duplicate) {
-          setStatus("That username is already taken.", "error");
-          return;
+            setStatus("That username is already taken.", "error");
+            return;
         }
 
+        if (wantsCaptain) {
+            const captainCount = await getCaptainCount();
+            if (captainCount >= MAX_CAPTAINS) {
+            setStatus("All 3 captain spots are already taken.", "error");
+            return;
+            }
+        }
+        /*
+        let playerId = localStorage.getItem("playerId");
+        if (!playerId) {
+            playerId = generatePlayerId();
+            localStorage.setItem("playerId", playerId);
+        }
+        */
+        const playerId = generatePlayerId();
         await set(ref(db, `lobby/players/${playerId}`), {
-          username,
-          joinedAt: Date.now()
+            username,
+            isCaptain: wantsCaptain,
+            photoDataUrl: croppedPhotoDataUrl || "",
+            teamCaptainId: null,
+            assignedRole: null,
+            roleAssignments: null,
+            rolesLocked: false,
+            joinedAt: Date.now()
         });
 
-        localStorage.setItem("joinedUsername", username);
+        //localStorage.setItem("joinedUsername", username);
+        //localStorage.setItem("joinedIsCaptain", wantsCaptain ? "1" : "0");
 
-        showJoinedState(username);
-        setStatus(`Joined as ${username}`, "success");
+        showJoinedState(username, wantsCaptain);
+        setStatus(
+            wantsCaptain ? `Joined as captain ${username}` : `Joined as ${username}`,
+            "success"
+        );
+
+        startRealtimeWatchers(playerId);
+
         usernameInput.value = "";
-      } catch (error) {
+        captainCheckbox.checked = false;
+        photoInput.value = "";
+        } catch (error) {
         console.error(error);
         setStatus("Something went wrong while joining.", "error");
-      }
+        }
     }
 
     async function refreshStatus() {
-      const savedPlayerId = localStorage.getItem("playerId");
-      const savedUsername = localStorage.getItem("joinedUsername");
+        const savedPlayerId = localStorage.getItem("playerId");
+        const savedUsername = localStorage.getItem("joinedUsername");
 
-      if (!savedPlayerId || !savedUsername) {
+        if (!savedPlayerId || !savedUsername) {
         setStatus("No saved player session found.", "error");
         showJoinState();
         return;
-      }
+        }
 
-      try {
+        try {
         const snapshot = await get(ref(db, `lobby/players/${savedPlayerId}`));
 
         if (snapshot.exists()) {
-          const player = snapshot.val();
-          showJoinedState(player.username || savedUsername);
-          setStatus("Your player is still active.", "success");
+            const player = snapshot.val();
+            showJoinedState(player.username || savedUsername, !!player.isCaptain);
+            setStatus("Your player is still active.", "success");
+            startRealtimeWatchers(savedPlayerId);
         } else {
-          await set(ref(db, `lobby/players/${savedPlayerId}`), {
-            username: savedUsername,
-            joinedAt: Date.now()
-          });
-
-          showJoinedState(savedUsername);
-          setStatus("Your player was restored.", "success");
+            setStatus("Your player is no longer in the lobby.", "error");
+            localStorage.removeItem("playerId");
+            localStorage.removeItem("joinedUsername");
+            localStorage.removeItem("joinedIsCaptain");
+            showJoinState();
         }
-      } catch (error) {
+        } catch (error) {
         console.error(error);
         setStatus("Could not refresh your status.", "error");
-      }
+        }
     }
 
     async function leaveGame() {
-      const savedPlayerId = localStorage.getItem("playerId");
+        const savedPlayerId = localStorage.getItem("playerId");
 
-      if (!savedPlayerId) {
+        if (!savedPlayerId) {
         localStorage.removeItem("joinedUsername");
+        localStorage.removeItem("joinedIsCaptain");
         showJoinState();
         setStatus("You have left the game.", "success");
         return;
-      }
+        }
 
-      try {
+        try {
         await remove(ref(db, `lobby/players/${savedPlayerId}`));
-      } catch (error) {
+        } catch (error) {
         console.error(error);
-      }
+        }
 
-      localStorage.removeItem("playerId");
-      localStorage.removeItem("joinedUsername");
+        localStorage.removeItem("playerId");
+        localStorage.removeItem("joinedUsername");
+        localStorage.removeItem("joinedIsCaptain");
 
-      showJoinState();
-      setStatus("You have left the game.", "success");
+        croppedPhotoDataUrl = "";
+        photoPreview.style.display = "none";
+        photoPreview.removeAttribute("src");
+
+        resetPhoneTheme();
+        showJoinState();
+        setStatus("You have left the game.", "success");
     }
 
     joinBtn.addEventListener("click", joinGame);
 
     usernameInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
+        if (e.key === "Enter") {
         joinGame();
-      }
+        }
     });
 
+    photoInput.addEventListener("change", handlePhotoSelection);
     refreshBtn.addEventListener("click", refreshStatus);
     leaveBtn.addEventListener("click", leaveGame);
 
-    restoreExistingPlayer();
-  </script>
+    //restoreExistingPlayer();
+    </script>
 </body>
 </html>

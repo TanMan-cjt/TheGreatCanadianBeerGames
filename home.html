@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Beer Games</title>
+
+  <!-- Bubble-style font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&display=swap" rel="stylesheet">
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    body {
+      background: #f7f3ea;
+      font-family: Arial, sans-serif;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .bubble-layer {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .center-content {
+      position: absolute;
+      inset: 0;
+      z-index: 3;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+
+    .logo-wrap {
+      position: relative;
+      z-index: 4;
+    }
+
+    .logo {
+      display: block;
+      max-width: min(52vw, 620px);
+      width: 100%;
+      height: auto;
+    }
+
+    .subtitle {
+      margin-top: 22px;
+      font-family: "Fredoka", Arial, sans-serif;
+      font-size: clamp(1.2rem, 2vw, 2rem);
+      letter-spacing: 0.08em;
+      color: #2b2b2b;
+      text-align: center;
+      text-transform: uppercase;
+      text-shadow: 0 2px 0 rgba(255,255,255,0.7);
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+
+    .floating-image {
+      position: absolute;
+      bottom: -180px;
+      z-index: 1;
+      opacity: 0.92;
+      user-select: none;
+      pointer-events: none;
+      animation-name: floatUp;
+      animation-timing-function: linear;
+      animation-fill-mode: forwards;
+    }
+
+    @keyframes floatUp {
+      from {
+        transform: translateY(0) rotate(0deg);
+      }
+      to {
+        transform: translateY(-120vh) rotate(10deg);
+      }
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.55;
+      }
+    }
+
+    .transition-overlay {
+      position: fixed;
+      left: 0;
+      top: 100vh;
+      width: 100vw;
+      height: 100vh;
+      z-index: 999;
+      pointer-events: none;
+      overflow: hidden;
+    }
+
+    .transition-overlay img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .transition-overlay.animate-in {
+      animation: slideCoverUp 0.7s ease-in-out forwards;
+    }
+
+    @keyframes slideCoverUp {
+      from {
+        top: 100vh;
+      }
+      to {
+        top: 0;
+      }
+    }
+
+  </style>
+</head>
+<body>
+  <div class="bubble-layer" id="bubbleLayer"></div>
+
+  <div class="center-content">
+    <div class="logo-wrap">
+      <img
+        src="content/images/beerGamesLogo.png"
+        alt="Beer Games Logo"
+        class="logo"
+      />
+    </div>
+    <div class="subtitle">CLICK ANYWHERE TO BEGIN</div>
+  </div>
+  <div id="transitionOverlay" class="transition-overlay">
+    <img src="content/images/transition.png" alt="" />
+  </div>
+  <script>
+    const bubbleLayer = document.getElementById("bubbleLayer");
+
+    const floatingImages = [
+      "content/images/bubble1.jpg",
+      "content/images/bubble2.jpg",
+      "content/images/bubble3.jpg",
+      "content/images/bubble4.jpg",
+      "content/images/bubble5.jpg",
+      "content/images/bubble6.png",
+      "content/images/bubble7.jpg",
+      "content/images/bubble8.jpg",
+      "content/images/bubble9.jpg",
+      "content/images/bubble10.jpg",
+      "content/images/bubble11.jpg",
+      "content/images/bubble12.jpg",
+      "content/images/bubble13.jpg",
+      "content/images/bubble14.jpg",
+      "content/images/bubble15.jpg",
+      "content/images/bubble16.jpg",
+      "content/images/bubble17.jpg",
+      "content/images/bubble18.jpg",
+      "content/images/bubble19.jpeg",
+      "content/images/bubble20.jpeg",
+      "content/images/bubble21.jpeg",
+      "content/images/bubble22.jpeg",
+      "content/images/bubble23.jpeg",
+      "content/images/bubble24.jpg",
+      "content/images/bubble25.jpg",
+    ];
+
+    const MAX_FLOATERS = 10;
+    let activeFloaters = 0;
+    const activeBubbles = [];
+    const activeImageSources = new Set();
+
+    function randomBetween(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    function cleanupBubble(id) {
+      const index = activeBubbles.findIndex(b => b.id === id);
+      if (index !== -1) activeBubbles.splice(index, 1);
+    }
+
+    function isOverlapping(candidateLeft, candidateSize) {
+      const candidateRight = candidateLeft + candidateSize;
+      const minGap = 40;
+
+      return activeBubbles.some(bubble => {
+        const bubbleLeft = bubble.left;
+        const bubbleRight = bubble.left + bubble.size;
+
+        return !(
+          candidateRight + minGap < bubbleLeft ||
+          candidateLeft > bubbleRight + minGap
+        );
+      });
+    }
+
+    function findValidPosition(size) {
+      const screenWidth = window.innerWidth;
+      const maxLeft = Math.max(20, screenWidth - size - 20);
+
+      for (let i = 0; i < 25; i++) {
+        const left = randomBetween(20, maxLeft);
+        if (!isOverlapping(left, size)) {
+          return left;
+        }
+      }
+
+      return null;
+    }
+
+    function getAvailableImageSource() {
+      const available = floatingImages.filter(src => !activeImageSources.has(src));
+
+      if (available.length === 0) {
+        return null;
+      }
+
+      return available[Math.floor(Math.random() * available.length)];
+    }
+
+    function spawnFloater() {
+      if (activeFloaters >= MAX_FLOATERS) return;
+
+      const size = randomBetween(180, 250);
+      const left = findValidPosition(size);
+
+      if (left === null) return;
+
+      activeFloaters++;
+
+      const id = crypto.randomUUID();
+      const img = document.createElement("img");
+      img.className = "floating-image";
+
+      const imageSrc = getAvailableImageSource();
+      if (!imageSrc) {
+        activeFloaters--;
+        return;
+      }
+
+      img.src = imageSrc;
+      activeImageSources.add(imageSrc);
+
+      img.style.width = `${size}px`;
+      img.style.left = `${left}px`;
+      img.style.animationDuration = `${randomBetween(4.8, 5.4)}s`;
+      img.dataset.bubbleId = id;
+
+      activeBubbles.push({ id, left, size });
+      bubbleLayer.appendChild(img);
+
+      img.addEventListener("animationend", () => {
+        img.remove();
+        activeFloaters--;
+        cleanupBubble(id);
+        activeImageSources.delete(imageSrc);
+      });
+    }
+
+    setInterval(() => {
+      if (activeFloaters < MAX_FLOATERS) {
+        spawnFloater();
+      }
+    }, 900);
+
+    for (let i = 0; i < 3; i++) {
+      setTimeout(spawnFloater, i * 300);
+    }
+
+    const transitionOverlay = document.getElementById("transitionOverlay");
+    let isTransitioning = false;
+
+    document.body.addEventListener("click", () => {
+      if (isTransitioning) return;
+      isTransitioning = true;
+
+      transitionOverlay.classList.add("animate-in");
+
+      setTimeout(() => {
+        window.location.href = "index.html?transition=1";
+      }, 700);
+    });
+  </script>
+</body>
+</html>
