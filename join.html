@@ -876,7 +876,7 @@
         return {
             heading: "Pick a captain",
             options: captains.filter(p => p.id !== currentPlayerId),
-            color: "#d9d9d9",
+            color: "#888888",
             layout: "single"
         };
         }
@@ -1352,20 +1352,23 @@
     }
 
     async function leaveGame() {
+        const confirmed = window.confirm("Confirm you want to leave the game?");
+        if (!confirmed) return;
+
         const savedPlayerId = localStorage.getItem("playerId");
 
         if (!savedPlayerId) {
-        localStorage.removeItem("joinedUsername");
-        localStorage.removeItem("joinedIsCaptain");
-        showJoinState();
-        setStatus("You have left the game.", "success");
-        return;
+            localStorage.removeItem("joinedUsername");
+            localStorage.removeItem("joinedIsCaptain");
+            showJoinState();
+            setStatus("You have left the game.", "success");
+            return;
         }
 
         try {
-        await remove(ref(db, `lobby/players/${savedPlayerId}`));
+            await remove(ref(db, `lobby/players/${savedPlayerId}`));
         } catch (error) {
-        console.error(error);
+            console.error(error);
         }
 
         localStorage.removeItem("playerId");
