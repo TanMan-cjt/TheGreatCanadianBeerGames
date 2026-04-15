@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Final Results</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: black;
+      color: white;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    body {
+      padding: 24px;
+    }
+
+    .board {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .team-column {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 24px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 0;
+    }
+
+    .captain-photo {
+      width: 15vh;
+      height: 15vh;
+      min-width: 100px;
+      min-height: 100px;
+      max-width: 170px;
+      max-height: 170px;
+      border-radius: 20px;
+      object-fit: cover;
+      border: 2px solid rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.10);
+    }
+
+    .captain-photo.placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      font-weight: bold;
+    }
+
+    .captain-name {
+      margin-top: 12px;
+      font-size: 1.15rem;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    .total-label {
+      margin-top: 24px;
+      font-size: 1.3rem;
+      opacity: 0.85;
+    }
+
+    .score-number {
+      margin-top: 16px;
+      font-size: clamp(4rem, 9vw, 7rem);
+      font-weight: bold;
+      line-height: 1;
+      letter-spacing: 0.02em;
+    }
+
+    .result-label {
+      margin-top: 18px;
+      font-size: 1.3rem;
+      font-weight: bold;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+
+    .result-label.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .winner {
+      color: #7CFF7C;
+    }
+
+    .loser {
+      color: #FF8E8E;
+    }
+  </style>
+</head>
+<body>
+  <div id="board" class="board"></div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getDatabase, ref, get } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBrkSrV78Gvxl_h6cps8SG-yDW0-_zJA4A",
+      authDomain: "thegreatcanadianbeergames.firebaseapp.com",
+      projectId: "thegreatcanadianbeergames",
+      storageBucket: "thegreatcanadianbeergames.firebasestorage.app",
+      messagingSenderId: "676718255243",
+      appId: "1:676718255243:web:9cd17e90c246968198088e",
+      measurementId: "G-L8WR52ZM6X"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const board = document.getElementById("board");
+
+    function getInitial(name) {
+      return (name || "?").charAt(0).toUpperCase();
+    }
+
+    function makePhoto(player) {
+      if (player?.photoDataUrl) {
+        const img = document.createElement("img");
+        img.className = "captain-photo";
+        img.src = player.photoDataUrl;
+        img.alt = `${player.username} photo`;
+        return img;
+      }
+
+      const div = document.createElement("div");
+      div.className = "captain-photo placeholder";
+      div.textContent = getInitial(player?.username || "?");
+      return div;
+    }
+
+    function animateValue(el, endValue, duration, delay = 0) {
+      setTimeout(() => {
+        const start = performance.now();
+        const startValue = 0;
+
+        function frame(now) {
+          const t = Math.min((now - start) / duration, 1);
+          const eased = 1 - Math.pow(1 - t, 3);
+          const value = Math.round(startValue + (endValue - startValue) * eased);
+          el.textContent = value;
+
+          if (t < 1) {
+            requestAnimationFrame(frame);
+          }
+        }
+
+        requestAnimationFrame(frame);
+      }, delay);
+    }
+
+    async function loadResults() {
+      const playersSnap = await get(ref(db, "lobby/players"));
+      const playersMap = playersSnap.val() || {};
+
+      const captains = Object.entries(playersMap)
+        .map(([id, p]) => ({ id, ...p }))
+        .filter(p => p.isCaptain)
+        .sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
+
+      const totals = captains.map(c => Number(c.totalScore || 0));
+      const maxScore = Math.max(...totals);
+      const minScore = Math.min(...totals);
+
+      captains.forEach((captain, index) => {
+        const col = document.createElement("div");
+        col.className = "team-column";
+
+        col.appendChild(makePhoto(captain));
+
+        const name = document.createElement("div");
+        name.className = "captain-name";
+        name.textContent = captain.username;
+        col.appendChild(name);
+
+        const totalLabel = document.createElement("div");
+        totalLabel.className = "total-label";
+        totalLabel.textContent = "Total:";
+        col.appendChild(totalLabel);
+
+        const scoreNumber = document.createElement("div");
+        scoreNumber.className = "score-number";
+        scoreNumber.textContent = "0";
+        col.appendChild(scoreNumber);
+
+        const resultLabel = document.createElement("div");
+        resultLabel.className = "result-label";
+
+        if (Number(captain.totalScore || 0) === maxScore) {
+          resultLabel.textContent = "Winner";
+          resultLabel.classList.add("winner");
+        } else if (Number(captain.totalScore || 0) === minScore) {
+          resultLabel.textContent = "Last Place";
+          resultLabel.classList.add("loser");
+        } else {
+          resultLabel.textContent = "—";
+        }
+
+        col.appendChild(resultLabel);
+        board.appendChild(col);
+
+        const delay = index * 1700;
+        animateValue(scoreNumber, Number(captain.totalScore || 0), 1400, delay);
+
+        setTimeout(() => {
+          resultLabel.classList.add("show");
+        }, delay + 1450);
+      });
+    }
+
+    loadResults();
+  </script>
+</body>
+</html>

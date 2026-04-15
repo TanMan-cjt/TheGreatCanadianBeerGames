@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Picks</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: black;
+      color: white;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    body {
+      position: relative;
+      padding: 24px;
+    }
+
+    .board {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .column {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 24px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      opacity: 0;
+      transform: translateY(16px);
+      transition: opacity 0.7s ease, transform 0.7s ease;
+    }
+
+    .column.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .column h2 {
+      margin: 0 0 16px 0;
+      font-size: 1.35rem;
+      text-align: center;
+    }
+
+    .votes {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-height: 0;
+      overflow-y: auto;
+    }
+
+    .vote-card {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 14px 12px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.10);
+      border: 1px solid rgba(255,255,255,0.12);
+      opacity: 0;
+      transform: scale(0.96);
+      transition: opacity 0.45s ease, transform 0.45s ease;
+      text-align: center;
+    }
+
+    .vote-card.show {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .photo {
+      width: 88px;
+      height: 88px;
+      border-radius: 18px;
+      object-fit: cover;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.18);
+      flex: 0 0 88px;
+    }
+
+    .photo.placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 1.35rem;
+    }
+
+    .vote-name {
+      font-size: 1rem;
+      line-height: 1.2;
+      word-break: break-word;
+      text-align: center;
+    }
+
+    #scoringButton {
+      position: fixed;
+      right: 40px;
+      bottom: 40px;
+      padding: 14px 22px;
+      border: none;
+      border-radius: 12px;
+      background: white;
+      color: black;
+      font-size: 2rem;
+      font-weight: bold;
+      cursor: pointer;
+      display: none;
+      z-index: 20;
+    }
+
+    #scoringButton:hover {
+      opacity: 0.92;
+    }
+
+    .fade {
+      position: fixed;
+      inset: 0;
+      background: black;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 1.2s ease;
+      z-index: 50;
+    }
+
+    .fade.show {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div class="board">
+    <div id="captainsColumn" class="column">
+      <h2>Captains Vote:</h2>
+      <div class="votes"></div>
+    </div>
+
+    <div id="tanksColumn" class="column">
+      <h2>Tanks Shield:</h2>
+      <div class="votes"></div>
+    </div>
+
+    <div id="assassinsColumn" class="column">
+      <h2>Assassins Kill:</h2>
+      <div class="votes"></div>
+    </div>
+
+    <div id="medicsColumn" class="column">
+      <h2>Medics Save:</h2>
+      <div class="votes"></div>
+    </div>
+  </div>
+
+  <button id="scoringButton">Scoring →</button>
+  <div id="fade" class="fade"></div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getDatabase, ref, get, update } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBrkSrV78Gvxl_h6cps8SG-yDW0-_zJA4A",
+      authDomain: "thegreatcanadianbeergames.firebaseapp.com",
+      projectId: "thegreatcanadianbeergames",
+      storageBucket: "thegreatcanadianbeergames.firebasestorage.app",
+      messagingSenderId: "676718255243",
+      appId: "1:676718255243:web:9cd17e90c246968198088e",
+      measurementId: "G-L8WR52ZM6X"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    const columns = {
+      captains: document.querySelector("#captainsColumn"),
+      tanks: document.querySelector("#tanksColumn"),
+      assassins: document.querySelector("#assassinsColumn"),
+      medics: document.querySelector("#medicsColumn")
+    };
+
+    const scoringButton = document.getElementById("scoringButton");
+    const fade = document.getElementById("fade");
+
+    function getInitial(name) {
+      return (name || "?").charAt(0).toUpperCase();
+    }
+
+    function makePhoto(player) {
+      if (player?.photoDataUrl) {
+        const img = document.createElement("img");
+        img.className = "photo";
+        img.src = player.photoDataUrl;
+        img.alt = `${player.username} photo`;
+        return img;
+      }
+
+      const div = document.createElement("div");
+      div.className = "photo placeholder";
+      div.textContent = getInitial(player?.username || "?");
+      return div;
+    }
+
+    function makeVoteCard(player) {
+      const card = document.createElement("div");
+      card.className = "vote-card";
+
+      card.appendChild(makePhoto(player));
+
+      const text = document.createElement("div");
+      text.className = "vote-name";
+      text.textContent = player?.username || "No selection";
+      card.appendChild(text);
+
+      return card;
+    }
+
+    async function loadData() {
+      const [playersSnap] = await Promise.all([
+        get(ref(db, "lobby/players"))
+      ]);
+
+      const playersMap = playersSnap.val() || {};
+      const players = Object.entries(playersMap).map(([id, p]) => ({ id, ...p }));
+
+      const captains = players.filter(p => p.isCaptain);
+      const tanks = players.filter(p => p.assignedRole === "tank");
+      const assassins = players.filter(p => p.assignedRole === "assassin");
+      const medics = players.filter(p => p.assignedRole === "medic");
+
+      const resolveTargets = (sourcePlayers) =>
+        sourcePlayers
+          .sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0))
+          .map(source => playersMap[source.currentSelectionTargetId] || null);
+
+      return {
+        captainVotes: resolveTargets(captains),
+        tankVotes: resolveTargets(tanks),
+        assassinVotes: resolveTargets(assassins),
+        medicVotes: resolveTargets(medics)
+      };
+    }
+
+    function revealColumn(columnEl, cards, startDelay) {
+      const votesWrap = columnEl.querySelector(".votes");
+
+      setTimeout(() => {
+        columnEl.classList.add("show");
+      }, startDelay);
+
+      cards.forEach((card, index) => {
+        votesWrap.appendChild(card);
+        setTimeout(() => {
+          card.classList.add("show");
+        }, startDelay + 450 + index * 350);
+      });
+
+      return startDelay + 450 + cards.length * 350;
+    }
+
+    async function runReveal() {
+      const data = await loadData();
+
+      const captainCards = data.captainVotes.map(makeVoteCard);
+      const tankCards = data.tankVotes.map(makeVoteCard);
+      const assassinCards = data.assassinVotes.map(makeVoteCard);
+      const medicCards = data.medicVotes.map(makeVoteCard);
+
+      let t = 200;
+      t = revealColumn(columns.captains, captainCards, t) + 250;
+      t = revealColumn(columns.tanks, tankCards, t) + 250;
+      t = revealColumn(columns.assassins, assassinCards, t) + 250;
+      t = revealColumn(columns.medics, medicCards, t) + 250;
+
+      setTimeout(() => {
+        scoringButton.style.display = "block";
+      }, t);
+    }
+
+    scoringButton.addEventListener("click", async () => {
+      await update(ref(db, "lobby"), {
+        phase: "scoring"
+      });
+
+      fade.classList.add("show");
+
+      setTimeout(() => {
+        window.location.href = "scoring.html";
+      }, 1200);
+    });
+
+    runReveal();
+  </script>
+</body>
+</html>

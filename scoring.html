@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Scoring</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: black;
+      color: white;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    body {
+      position: relative;
+      padding: 24px;
+    }
+
+    .board {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .team-column {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.10);
+      border-radius: 24px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      min-height: 0;
+    }
+
+    .captain-photo {
+      width: 15vh;
+      height: 15vh;
+      min-width: 100px;
+      min-height: 100px;
+      max-width: 170px;
+      max-height: 170px;
+      border-radius: 20px;
+      object-fit: cover;
+      border: 2px solid rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.10);
+    }
+
+    .captain-photo.placeholder {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      font-weight: bold;
+    }
+
+    .captain-name {
+      margin-top: 12px;
+      font-size: 1.15rem;
+      font-weight: bold;
+      text-align: center;
+    }
+
+    .score-number {
+      margin-top: 36px;
+      font-size: clamp(4rem, 9vw, 7rem);
+      font-weight: bold;
+      line-height: 1;
+      letter-spacing: 0.02em;
+    }
+
+    .controls {
+      margin-top: 26px;
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .score-btn {
+      width: 78px;
+      height: 78px;
+      border: none;
+      border-radius: 18px;
+      font-size: 2.5rem;
+      font-weight: bold;
+      cursor: pointer;
+      background: white;
+      color: black;
+    }
+
+    .score-btn:hover {
+      opacity: 0.92;
+    }
+
+    #nextButton {
+      position: fixed;
+      left: 40px;
+      bottom: 40px;
+      padding: 14px 22px;
+      border: none;
+      border-radius: 12px;
+      background: white;
+      color: black;
+      font-size: 2rem;
+      font-weight: bold;
+      cursor: pointer;
+      z-index: 20;
+    }
+
+    #nextButton:hover {
+      opacity: 0.92;
+    }
+
+    .fade {
+      position: fixed;
+      inset: 0;
+      background: black;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 1.2s ease;
+      z-index: 50;
+    }
+
+    .fade.show {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="board" class="board"></div>
+  <button id="nextButton"></button>
+  <div id="fade" class="fade"></div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import { getDatabase, ref, get, update } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBrkSrV78Gvxl_h6cps8SG-yDW0-_zJA4A",
+      authDomain: "thegreatcanadianbeergames.firebaseapp.com",
+      projectId: "thegreatcanadianbeergames",
+      storageBucket: "thegreatcanadianbeergames.firebasestorage.app",
+      messagingSenderId: "676718255243",
+      appId: "1:676718255243:web:9cd17e90c246968198088e",
+      measurementId: "G-L8WR52ZM6X"
+    };
+
+    const GAME_ORDER = ["beerpong", "pizzabox", "kingscup", "pokerface", "tablefootball"];
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    const board = document.getElementById("board");
+    const nextButton = document.getElementById("nextButton");
+    const fade = document.getElementById("fade");
+
+    let captains = [];
+    let round = 1;
+    let localScores = {};
+    let isTransitioning = false;
+
+    function getInitial(name) {
+      return (name || "?").charAt(0).toUpperCase();
+    }
+
+    function makePhoto(player) {
+      if (player?.photoDataUrl) {
+        const img = document.createElement("img");
+        img.className = "captain-photo";
+        img.src = player.photoDataUrl;
+        img.alt = `${player.username} photo`;
+        return img;
+      }
+
+      const div = document.createElement("div");
+      div.className = "captain-photo placeholder";
+      div.textContent = getInitial(player?.username || "?");
+      return div;
+    }
+
+    function render() {
+      board.innerHTML = "";
+
+      captains.forEach(captain => {
+        const col = document.createElement("div");
+        col.className = "team-column";
+
+        col.appendChild(makePhoto(captain));
+
+        const name = document.createElement("div");
+        name.className = "captain-name";
+        name.textContent = captain.username;
+        col.appendChild(name);
+
+        const number = document.createElement("div");
+        number.className = "score-number";
+        number.textContent = localScores[captain.id] ?? 0;
+        col.appendChild(number);
+
+        const controls = document.createElement("div");
+        controls.className = "controls";
+
+        const minus = document.createElement("button");
+        minus.className = "score-btn";
+        minus.textContent = "−";
+        minus.addEventListener("click", () => {
+          localScores[captain.id] = Math.max(0, (localScores[captain.id] ?? 0) - 1);
+          render();
+        });
+
+        const plus = document.createElement("button");
+        plus.className = "score-btn";
+        plus.textContent = "+";
+        plus.addEventListener("click", () => {
+          localScores[captain.id] = (localScores[captain.id] ?? 0) + 1;
+          render();
+        });
+
+        controls.appendChild(minus);
+        controls.appendChild(plus);
+        col.appendChild(controls);
+
+        board.appendChild(col);
+      });
+
+      nextButton.textContent = round >= 5 ? "Results →" : "Next Round →";
+    }
+
+    async function loadData() {
+      const [lobbySnap, playersSnap] = await Promise.all([
+        get(ref(db, "lobby")),
+        get(ref(db, "lobby/players"))
+      ]);
+
+      const lobby = lobbySnap.val() || {};
+      const playersMap = playersSnap.val() || {};
+      round = lobby.currentRound || 1;
+
+      captains = Object.entries(playersMap)
+        .map(([id, p]) => ({ id, ...p }))
+        .filter(p => p.isCaptain)
+        .sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
+
+      captains.forEach(captain => {
+        localScores[captain.id] = captain.roundScores?.[round] ?? 0;
+      });
+
+      render();
+    }
+
+    async function saveScores() {
+      const updates = {};
+
+      captains.forEach(captain => {
+        const score = localScores[captain.id] ?? 0;
+        const existingRoundScores = captain.roundScores || {};
+        const nextRoundScores = {
+          ...existingRoundScores,
+          [round]: score
+        };
+
+        const totalScore = [1, 2, 3, 4, 5].reduce((sum, n) => {
+          return sum + Number(nextRoundScores[n] || 0);
+        }, 0);
+
+        updates[`lobby/players/${captain.id}/roundScores`] = nextRoundScores;
+        updates[`lobby/players/${captain.id}/totalScore`] = totalScore;
+      });
+
+      await update(ref(db), updates);
+    }
+
+    async function clearSelectionsForNextRound(nextRound) {
+      const playersSnap = await get(ref(db, "lobby/players"));
+      const playersMap = playersSnap.val() || {};
+      const updates = {};
+
+      Object.keys(playersMap).forEach(playerId => {
+        updates[`lobby/players/${playerId}/currentSelectionTargetId`] = null;
+        updates[`lobby/players/${playerId}/currentSelectionSubmitted`] = false;
+        updates[`lobby/players/${playerId}/currentSelectionRound`] = null;
+      });
+
+      updates["lobby/currentRound"] = nextRound;
+      updates["lobby/currentGameKey"] = GAME_ORDER[nextRound - 1];
+      updates["lobby/phase"] = "gameplay";
+
+      await update(ref(db), updates);
+    }
+
+    nextButton.addEventListener("click", async () => {
+      if (isTransitioning) return;
+      isTransitioning = true;
+
+      try {
+        await saveScores();
+
+        if (round >= 5) {
+          await update(ref(db, "lobby"), {
+            phase: "final"
+          });
+
+          fade.classList.add("show");
+          setTimeout(() => {
+            window.location.href = "final.html";
+          }, 1200);
+          return;
+        }
+
+        await clearSelectionsForNextRound(round + 1);
+
+        fade.classList.add("show");
+        setTimeout(() => {
+          window.location.href = "game.html";
+        }, 1200);
+      } catch (error) {
+        console.error("Could not advance round:", error);
+        isTransitioning = false;
+      }
+    });
+
+    loadData();
+  </script>
+</body>
+</html>

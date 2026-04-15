@@ -202,21 +202,18 @@
     };
 
     const ROLE_META = {
-        tank: {
-        label: "Tank",
-        color: "#24964c",
-        icon: "content/images/tank.png"
-        },
-        assassin: {
-        label: "Assassin",
-        color: "#b33333",
-        icon: "content/images/assassin.png"
-        },
-        medic: {
-        label: "Medic",
-        color: "#2b6fd8",
-        icon: "content/images/medic.png"
-        }
+        tank: { label: "Tank", color: "#24964c", icon: "content/images/tank.png" },
+        assassin: { label: "Assassin", color: "#b33333", icon: "content/images/assassin.png" },
+        medic: { label: "Medic", color: "#2b6fd8", icon: "content/images/medic.png" },
+        captain: { label: "Captain", color: "#d9d9d9" }
+    };
+
+    const GAME_META = {
+        beerpong: { label: "Beer Pong" },
+        pizzabox: { label: "Pizza Box" },
+        kingscup: { label: "King's Cup" },
+        pokerface: { label: "Poker Face" },
+        tablefootball: { label: "Table Football" }
     };
 
     const ROLE_ORDER = ["tank", "assassin", "medic"];
@@ -241,15 +238,16 @@
     const card = document.querySelector(".card");
 
     let croppedPhotoDataUrl = "";
+    let currentPlayerId = null;
+    let currentPlayerData = null;
+    let currentPlayersCache = {};
+    let currentLobbyState = {};
     let playerWatcherUnsub = null;
     let lobbyWatcherUnsub = null;
-    let currentLobbyPhase = "join";
-    let currentPlayerData = null;
-    let currentPlayerId = null;
-    let currentPlayersCache = {};
     let captainRoleOrder = [];
     let dragSourceIndex = null;
     let touchSourceIndex = null;
+    let selectedVoteTargetId = null;
 
     function generatePlayerId() {
         return "player_" + crypto.randomUUID();
@@ -283,7 +281,6 @@
         card.style.borderColor = "#ddd";
         card.style.color = "black";
         }
-        status.style.color = "";
     }
 
     function applyRoleTheme(roleKey) {
@@ -292,10 +289,8 @@
         resetPhoneTheme();
         return;
         }
-
         document.body.style.transition = "background 0.25s ease";
         document.body.style.background = role.color;
-
         if (card) {
         card.style.background = "rgba(255,255,255,0.94)";
         card.style.borderColor = "rgba(255,255,255,0.45)";
@@ -331,6 +326,42 @@
         div.style.background = "#eee";
         div.style.border = "1px solid #ccc";
         return div;
+    }
+
+    function makePlayerTile(player, options = {}) {
+        const {
+        vertical = false,
+        selected = false,
+        highlightColor = "#ddd",
+        compact = false
+        } = options;
+
+        const tile = document.createElement("div");
+        tile.style.border = selected ? `3px solid ${highlightColor}` : "1px solid #ccc";
+        tile.style.borderRadius = "16px";
+        tile.style.padding = compact ? "8px" : "10px";
+        tile.style.background = selected ? "#f7f7f7" : "#fafafa";
+        tile.style.display = "flex";
+        tile.style.flexDirection = vertical ? "column" : "row";
+        tile.style.alignItems = "center";
+        tile.style.justifyContent = "center";
+        tile.style.gap = "10px";
+        tile.style.textAlign = "center";
+        tile.style.minHeight = vertical ? "120px" : "78px";
+        tile.style.cursor = "pointer";
+        tile.style.userSelect = "none";
+
+        const photo = makePhotoElement(player, vertical ? "64px" : "56px");
+        tile.appendChild(photo);
+
+        const name = document.createElement("div");
+        name.textContent = player?.username || "—";
+        name.style.fontWeight = "bold";
+        name.style.fontSize = "0.95rem";
+        name.style.wordBreak = "break-word";
+        tile.appendChild(name);
+
+        return tile;
     }
 
     function showJoinedState(username, isCaptain = false) {
@@ -381,14 +412,11 @@
     function cropImageToSquareDataUrl(img, size = 180, quality = 0.82) {
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
-
         canvas.width = size;
         canvas.height = size;
-
         const side = Math.min(img.width, img.height);
         const sx = (img.width - side) / 2;
         const sy = (img.height - side) / 2;
-
         ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
         return canvas.toDataURL("image/jpeg", quality);
     }
@@ -422,7 +450,7 @@
 
     function getTeamMembersForCaptain(captainId) {
         return Object.entries(currentPlayersCache)
-        .map(([id, player]) => ({ id, ...player }))
+        .map(([id, p]) => ({ id, ...p }))
         .filter(player => !player.isCaptain && player.teamCaptainId === captainId)
         .sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
     }
@@ -440,6 +468,90 @@
         }
         }
         return null;
+    }
+
+    function normalizeCaptainRoleOrder(captain, teamMembers) {
+        const memberIds = teamMembers.map(player => player.id);
+        const savedAssignments = captain.roleAssignments || {};
+        const savedOrder = ROLE_ORDER.map(roleKey => savedAssignments[roleKey]).filter(Boolean);
+
+        const savedValid =
+        savedOrder.length === 3 &&
+        memberIds.every(id => savedOrder.includes(id));
+
+        if (savedValid) {
+        captainRoleOrder = ROLE_ORDER.map(roleKey => savedAssignments[roleKey]);
+        return;
+        }
+
+        const localValid =
+        captainRoleOrder.length === 3 &&
+        memberIds.every(id => captainRoleOrder.includes(id));
+
+        if (localValid) return;
+
+        captainRoleOrder = [...memberIds];
+    }
+
+    function swapCaptainSlots(a, b) {
+        if (a === null || b === null || a === b) return;
+        const next = [...captainRoleOrder];
+        [next[a], next[b]] = [next[b], next[a]];
+        captainRoleOrder = next;
+        renderLivePlayerStatus(currentPlayerData, currentLobbyState.phase || "join");
+    }
+
+    async function submitCaptainRoles(captain, teamMembers) {
+        if (captain.rolesLocked) return;
+        if (captainRoleOrder.length !== 3) return;
+
+        const assignments = {
+        tank: captainRoleOrder[0],
+        assassin: captainRoleOrder[1],
+        medic: captainRoleOrder[2]
+        };
+
+        const validTeamIds = teamMembers.map(player => player.id);
+        const valid =
+        validTeamIds.length === 3 &&
+        validTeamIds.every(id => captainRoleOrder.includes(id));
+
+        if (!valid) {
+        setStatus("Your team is not ready yet.", "error");
+        return;
+        }
+
+        const updates = {};
+        updates[`lobby/players/${captain.id}/roleAssignments`] = assignments;
+        updates[`lobby/players/${captain.id}/rolesLocked`] = true;
+
+        ROLE_ORDER.forEach((roleKey, index) => {
+        const playerId = captainRoleOrder[index];
+        updates[`lobby/players/${playerId}/assignedRole`] = roleKey;
+        });
+
+        try {
+        await update(ref(db), updates);
+        setStatus("Roles submitted.", "success");
+        } catch (error) {
+        console.error(error);
+        setStatus("Could not submit roles.", "error");
+        }
+    }
+
+    async function submitGameplaySelection(player, targetId) {
+        const round = currentLobbyState.currentRound || 1;
+        try {
+        await update(ref(db, `lobby/players/${currentPlayerId}`), {
+            currentSelectionTargetId: targetId,
+            currentSelectionSubmitted: true,
+            currentSelectionRound: round
+        });
+        setStatus("Selection submitted.", "success");
+        } catch (error) {
+        console.error(error);
+        setStatus("Could not submit selection.", "error");
+        }
     }
 
     function renderAssignmentWaiting(player, panel) {
@@ -492,77 +604,6 @@
         name.style.fontWeight = "bold";
         name.style.textAlign = "center";
         panel.appendChild(name);
-    }
-
-    function normalizeCaptainRoleOrder(captain, teamMembers) {
-        const memberIds = teamMembers.map(player => player.id);
-        const savedAssignments = captain.roleAssignments || {};
-        const savedOrder = ROLE_ORDER.map(roleKey => savedAssignments[roleKey]).filter(Boolean);
-
-        const savedValid =
-        savedOrder.length === 3 &&
-        memberIds.every(id => savedOrder.includes(id));
-
-        if (savedValid) {
-        captainRoleOrder = ROLE_ORDER.map(roleKey => savedAssignments[roleKey]);
-        return;
-        }
-
-        const localValid =
-        captainRoleOrder.length === 3 &&
-        memberIds.every(id => captainRoleOrder.includes(id));
-
-        if (localValid) {
-        return;
-        }
-
-        captainRoleOrder = [...memberIds];
-    }
-
-    function swapCaptainSlots(a, b) {
-        if (a === null || b === null || a === b) return;
-        const next = [...captainRoleOrder];
-        [next[a], next[b]] = [next[b], next[a]];
-        captainRoleOrder = next;
-        renderLivePlayerStatus(currentPlayerData, currentLobbyPhase);
-    }
-
-    async function submitCaptainRoles(captain, teamMembers) {
-        if (captain.rolesLocked) return;
-        if (captainRoleOrder.length !== 3) return;
-
-        const assignments = {
-        tank: captainRoleOrder[0],
-        assassin: captainRoleOrder[1],
-        medic: captainRoleOrder[2]
-        };
-
-        const validTeamIds = teamMembers.map(player => player.id);
-        const valid =
-        validTeamIds.length === 3 &&
-        validTeamIds.every(id => captainRoleOrder.includes(id));
-
-        if (!valid) {
-        setStatus("Your team is not ready yet.", "error");
-        return;
-        }
-
-        const updates = {};
-        updates[`lobby/players/${captain.id}/roleAssignments`] = assignments;
-        updates[`lobby/players/${captain.id}/rolesLocked`] = true;
-
-        ROLE_ORDER.forEach((roleKey, index) => {
-        const playerId = captainRoleOrder[index];
-        updates[`lobby/players/${playerId}/assignedRole`] = roleKey;
-        });
-
-        try {
-        await update(ref(db), updates);
-        setStatus("Roles submitted.", "success");
-        } catch (error) {
-        console.error(error);
-        setStatus("Could not submit roles.", "error");
-        }
     }
 
     function renderCaptainRolesLocked(captain, teamMembers, panel) {
@@ -687,37 +728,29 @@
         slot.style.cursor = "grab";
         slot.style.userSelect = "none";
 
-        const photo = makePhotoElement(member, "56px");
-        photo.style.borderRadius = "14px";
-        slot.appendChild(photo);
+        slot.appendChild(makePhotoElement(member, "56px"));
 
         const slotText = document.createElement("div");
-        slotText.style.minWidth = "0";
-
         const slotName = document.createElement("div");
         slotName.textContent = member?.username || "—";
         slotName.style.fontWeight = "bold";
         slotName.style.fontSize = "0.95rem";
         slotName.style.wordBreak = "break-word";
         slotText.appendChild(slotName);
-
         slot.appendChild(slotText);
 
         slot.addEventListener("dragstart", () => {
             dragSourceIndex = index;
         });
-
         slot.addEventListener("dragover", (e) => {
             e.preventDefault();
         });
-
         slot.addEventListener("drop", (e) => {
             e.preventDefault();
             if (dragSourceIndex === null) return;
             swapCaptainSlots(dragSourceIndex, index);
             dragSourceIndex = null;
         });
-
         slot.addEventListener("dragend", () => {
             dragSourceIndex = null;
         });
@@ -765,7 +798,6 @@
         roleBox.appendChild(icon);
 
         row.appendChild(roleBox);
-
         wrap.appendChild(row);
         });
 
@@ -788,13 +820,11 @@
 
     function renderPlayerRoleResult(player, panel) {
         panel.innerHTML = "";
-
         const assignedRole = getAssignedRoleForPlayer(player);
         const captain = getCaptainForPlayer(player);
 
         if (!assignedRole) {
         resetPhoneTheme();
-
         const waiting = document.createElement("div");
         waiting.textContent = "Captain is assigning roles";
         waiting.style.fontWeight = "bold";
@@ -833,6 +863,278 @@
         }
     }
 
+    function getGameplayOptions(player) {
+        const allPlayers = Object.entries(currentPlayersCache).map(([id, p]) => ({ id, ...p }));
+        const captains = allPlayers.filter(p => p.isCaptain).sort((a, b) => (a.joinedAt || 0) - (b.joinedAt || 0));
+
+        if (player.isCaptain) {
+        return {
+            heading: "Pick a captain",
+            options: captains.filter(p => p.id !== currentPlayerId),
+            color: "#d9d9d9",
+            layout: "single"
+        };
+        }
+
+        const role = getAssignedRoleForPlayer(player);
+
+        if (role === "tank") {
+        return {
+            heading: "Pick a teammate to protect",
+            options: allPlayers.filter(p =>
+            !p.isCaptain &&
+            p.teamCaptainId === player.teamCaptainId &&
+            p.id !== currentPlayerId
+            ),
+            color: "#24964c",
+            layout: "single"
+        };
+        }
+
+        if (role === "assassin") {
+        const otherTeams = allPlayers.filter(p =>
+            !p.isCaptain &&
+            p.teamCaptainId &&
+            p.teamCaptainId !== player.teamCaptainId
+        );
+
+        return {
+            heading: "Pick a target",
+            options: otherTeams,
+            color: "#b33333",
+            layout: "two-team"
+        };
+        }
+
+        if (role === "medic") {
+        return {
+            heading: "Pick a teammate to save",
+            options: allPlayers.filter(p =>
+            !p.isCaptain &&
+            p.teamCaptainId === player.teamCaptainId
+            ),
+            color: "#2b6fd8",
+            layout: "single"
+        };
+        }
+
+        return {
+        heading: "Waiting...",
+        options: [],
+        color: "#ddd",
+        layout: "single"
+        };
+    }
+
+    function renderGameplayVoting(player, panel) {
+        panel.innerHTML = "";
+        resetPhoneTheme();
+
+        const game = GAME_META[currentLobbyState.currentGameKey] || { label: "Game" };
+        const { heading, options, color, layout } = getGameplayOptions(player);
+
+        const gameLabel = document.createElement("div");
+        gameLabel.textContent = `Round ${currentLobbyState.currentRound || 1}: ${game.label}`;
+        gameLabel.style.textAlign = "center";
+        gameLabel.style.fontWeight = "bold";
+        gameLabel.style.marginBottom = "8px";
+        panel.appendChild(gameLabel);
+
+        const title = document.createElement("div");
+        title.textContent = heading;
+        title.style.fontWeight = "bold";
+        title.style.fontSize = "1.15rem";
+        title.style.textAlign = "center";
+        title.style.marginBottom = "14px";
+        panel.appendChild(title);
+
+        const alreadySubmitted = player.currentSelectionSubmitted === true;
+        const submittedTargetId = player.currentSelectionTargetId || null;
+
+        if (alreadySubmitted) {
+        const submittedPlayer = currentPlayersCache[submittedTargetId];
+        const note = document.createElement("div");
+        note.textContent = "Selection submitted";
+        note.style.textAlign = "center";
+        note.style.fontWeight = "bold";
+        note.style.marginBottom = "12px";
+        panel.appendChild(note);
+
+        if (submittedPlayer) {
+            const tile = makePlayerTile(submittedPlayer, {
+            vertical: true,
+            selected: true,
+            highlightColor: color
+            });
+            tile.style.cursor = "default";
+            panel.appendChild(tile);
+        }
+        return;
+        }
+
+        if (!options.length) {
+        const wait = document.createElement("div");
+        wait.textContent = "Waiting for available choices...";
+        wait.style.textAlign = "center";
+        wait.style.fontWeight = "bold";
+        panel.appendChild(wait);
+        return;
+        }
+
+        selectedVoteTargetId = selectedVoteTargetId && options.some(p => p.id === selectedVoteTargetId)
+        ? selectedVoteTargetId
+        : null;
+
+        let wrap;
+
+        if (layout === "two-team") {
+        wrap = document.createElement("div");
+        wrap.style.display = "grid";
+        wrap.style.gridTemplateColumns = "1fr 1fr";
+        wrap.style.gap = "10px";
+        wrap.style.marginBottom = "14px";
+
+        const grouped = {};
+        options.forEach(playerOption => {
+            grouped[playerOption.teamCaptainId] = grouped[playerOption.teamCaptainId] || [];
+            grouped[playerOption.teamCaptainId].push(playerOption);
+        });
+
+        Object.entries(grouped).forEach(([captainId, teamPlayers]) => {
+            const col = document.createElement("div");
+            col.style.display = "flex";
+            col.style.flexDirection = "column";
+            col.style.gap = "10px";
+
+            const captain = currentPlayersCache[captainId];
+            const headingEl = document.createElement("div");
+            headingEl.textContent = captain?.username || "Team";
+            headingEl.style.textAlign = "center";
+            headingEl.style.fontWeight = "bold";
+            col.appendChild(headingEl);
+
+            teamPlayers.forEach(playerOption => {
+            const tile = makePlayerTile(playerOption, {
+                vertical: true,
+                selected: selectedVoteTargetId === playerOption.id,
+                highlightColor: color,
+                compact: true
+            });
+            tile.addEventListener("click", () => {
+                selectedVoteTargetId = playerOption.id;
+                renderLivePlayerStatus(currentPlayerData, currentLobbyState.phase || "join");
+            });
+            col.appendChild(tile);
+            });
+
+            wrap.appendChild(col);
+        });
+        } else {
+        wrap = document.createElement("div");
+        wrap.style.display = "flex";
+        wrap.style.flexDirection = "column";
+        wrap.style.gap = "10px";
+        wrap.style.marginBottom = "14px";
+
+        options.forEach(playerOption => {
+            const tile = makePlayerTile(playerOption, {
+            vertical: true,
+            selected: selectedVoteTargetId === playerOption.id,
+            highlightColor: color
+            });
+            tile.addEventListener("click", () => {
+            selectedVoteTargetId = playerOption.id;
+            renderLivePlayerStatus(currentPlayerData, currentLobbyState.phase || "join");
+            });
+            wrap.appendChild(tile);
+        });
+        }
+
+        panel.appendChild(wrap);
+
+        const submitBtn = document.createElement("button");
+        submitBtn.textContent = "Submit";
+        submitBtn.style.width = "100%";
+        submitBtn.style.padding = "14px";
+        submitBtn.style.fontSize = "1rem";
+        submitBtn.style.border = "none";
+        submitBtn.style.borderRadius = "12px";
+        submitBtn.style.background = "black";
+        submitBtn.style.color = "white";
+        submitBtn.style.cursor = selectedVoteTargetId ? "pointer" : "not-allowed";
+        submitBtn.style.opacity = selectedVoteTargetId ? "1" : "0.5";
+        submitBtn.disabled = !selectedVoteTargetId;
+        submitBtn.addEventListener("click", () => {
+        if (!selectedVoteTargetId) return;
+        submitGameplaySelection(player, selectedVoteTargetId);
+        });
+        panel.appendChild(submitBtn);
+    }
+
+    function renderPicksWaiting(player, panel) {
+        panel.innerHTML = "";
+        resetPhoneTheme();
+
+        const title = document.createElement("div");
+        title.textContent = "Selections locked";
+        title.style.textAlign = "center";
+        title.style.fontWeight = "bold";
+        title.style.fontSize = "1.15rem";
+        title.style.marginBottom = "12px";
+        panel.appendChild(title);
+
+        const target = currentPlayersCache[player.currentSelectionTargetId];
+        if (target) {
+        panel.appendChild(makePlayerTile(target, {
+            vertical: true,
+            selected: true,
+            highlightColor: "#111"
+        }));
+        }
+
+        const subtitle = document.createElement("div");
+        subtitle.textContent = "Waiting for scoring...";
+        subtitle.style.textAlign = "center";
+        subtitle.style.marginTop = "12px";
+        panel.appendChild(subtitle);
+    }
+
+    function renderScoringWaiting(panel) {
+        panel.innerHTML = "";
+        resetPhoneTheme();
+
+        const title = document.createElement("div");
+        title.textContent = "Scoring in progress";
+        title.style.textAlign = "center";
+        title.style.fontWeight = "bold";
+        title.style.fontSize = "1.15rem";
+        title.style.marginBottom = "12px";
+        panel.appendChild(title);
+
+        const subtitle = document.createElement("div");
+        subtitle.textContent = "Await the next round.";
+        subtitle.style.textAlign = "center";
+        panel.appendChild(subtitle);
+    }
+
+    function renderFinalWaiting(panel) {
+        panel.innerHTML = "";
+        resetPhoneTheme();
+
+        const title = document.createElement("div");
+        title.textContent = "Final results";
+        title.style.textAlign = "center";
+        title.style.fontWeight = "bold";
+        title.style.fontSize = "1.15rem";
+        title.style.marginBottom = "12px";
+        panel.appendChild(title);
+
+        const subtitle = document.createElement("div");
+        subtitle.textContent = "Check the main screen.";
+        subtitle.style.textAlign = "center";
+        panel.appendChild(subtitle);
+    }
+
     function renderLivePlayerStatus(player, phase) {
         const panel = ensureLivePanel();
 
@@ -858,21 +1160,23 @@
         return;
         }
 
-        if (phase === "game1") {
-        const assignedRole = getAssignedRoleForPlayer(player);
-        if (assignedRole) {
-            applyRoleTheme(assignedRole);
-        } else {
-            resetPhoneTheme();
+        if (phase === "gameplay") {
+        renderGameplayVoting(player, panel);
+        return;
         }
 
-        panel.innerHTML = "";
-        const title = document.createElement("div");
-        title.textContent = "Game is starting";
-        title.style.fontWeight = "bold";
-        title.style.fontSize = "1.2rem";
-        title.style.textAlign = "center";
-        panel.appendChild(title);
+        if (phase === "picks") {
+        renderPicksWaiting(player, panel);
+        return;
+        }
+
+        if (phase === "scoring") {
+        renderScoringWaiting(panel);
+        return;
+        }
+
+        if (phase === "final" || phase === "game1") {
+        renderFinalWaiting(panel);
         return;
         }
 
@@ -893,13 +1197,13 @@
 
         if (me) {
             showJoinedState(me.username, !!me.isCaptain);
-            renderLivePlayerStatus(me, currentLobbyPhase);
+            renderLivePlayerStatus(me, currentLobbyState.phase || "join");
         }
         });
 
-        lobbyWatcherUnsub = onValue(ref(db, "lobby/phase"), (snapshot) => {
-        currentLobbyPhase = snapshot.val() || "join";
-        renderLivePlayerStatus(currentPlayerData, currentLobbyPhase);
+        lobbyWatcherUnsub = onValue(ref(db, "lobby"), (snapshot) => {
+        currentLobbyState = snapshot.val() || {};
+        renderLivePlayerStatus(currentPlayerData, currentLobbyState.phase || "join");
         });
     }
 
@@ -982,6 +1286,9 @@
             assignedRole: null,
             roleAssignments: null,
             rolesLocked: false,
+            currentSelectionTargetId: null,
+            currentSelectionSubmitted: false,
+            currentSelectionRound: null,
             joinedAt: Date.now()
         });
 
@@ -1069,9 +1376,7 @@
     joinBtn.addEventListener("click", joinGame);
 
     usernameInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-        joinGame();
-        }
+        if (e.key === "Enter") joinGame();
     });
 
     photoInput.addEventListener("change", handlePhotoSelection);

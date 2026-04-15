@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Game</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: black;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+      color: white;
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    .screen {
+      text-align: center;
+      opacity: 0;
+      transform: scale(0.96);
+      transition: opacity 1.2s ease, transform 1.2s ease;
+      padding: 24px;
+    }
+
+    .screen.show {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    .logo {
+      width: min(62vw, 620px);
+      max-width: 80vw;
+      height: auto;
+      display: block;
+      margin: 0 auto 20px auto;
+      border-radius: 24px;
+    }
+
+    .prompt {
+      font-size: clamp(1.2rem, 2.2vw, 2rem);
+      font-weight: bold;
+      letter-spacing: 0.03em;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity 0.7s ease 1.0s, transform 0.7s ease 1.0s;
+    }
+
+    .screen.show .prompt {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .round-label {
+      position: absolute;
+      top: 26px;
+      left: 26px;
+      font-size: 1.1rem;
+      color: rgba(255,255,255,0.85);
+      z-index: 2;
+    }
+
+    .fade {
+      position: fixed;
+      inset: 0;
+      background: black;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 1.4s ease;
+      z-index: 10;
+    }
+
+    .fade.show {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="roundLabel" class="round-label"></div>
+
+  <div id="screen" class="screen">
+    <img id="gameLogo" class="logo" src="" alt="Game Logo" />
+    <div class="prompt">Make your selections</div>
+  </div>
+
+  <div id="fade" class="fade"></div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+    import {
+      getDatabase,
+      ref,
+      onValue,
+      update
+    } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyBrkSrV78Gvxl_h6cps8SG-yDW0-_zJA4A",
+      authDomain: "thegreatcanadianbeergames.firebaseapp.com",
+      projectId: "thegreatcanadianbeergames",
+      storageBucket: "thegreatcanadianbeergames.firebasestorage.app",
+      messagingSenderId: "676718255243",
+      appId: "1:676718255243:web:9cd17e90c246968198088e",
+      measurementId: "G-L8WR52ZM6X"
+    };
+
+    const GAME_META = {
+      beerpong: {
+        label: "Beer Pong",
+        logo: "content/images/beerpong.png"
+      },
+      pizzabox: {
+        label: "Pizza Box",
+        logo: "content/images/pizzabox.png"
+      },
+      kingscup: {
+        label: "King's Cup",
+        logo: "content/images/kingscup.png"
+      },
+      pokerface: {
+        label: "Poker Face",
+        logo: "content/images/pokerface.png"
+      },
+      tablefootball: {
+        label: "Table Football",
+        logo: "content/images/tablefootball.png"
+      }
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    const screen = document.getElementById("screen");
+    const gameLogo = document.getElementById("gameLogo");
+    const roundLabel = document.getElementById("roundLabel");
+    const fade = document.getElementById("fade");
+
+    let transitioned = false;
+    let lobbyState = {};
+    let playersMap = {};
+
+    function renderGame() {
+      const round = lobbyState.currentRound || 1;
+      const gameKey = lobbyState.currentGameKey || "beerpong";
+      const game = GAME_META[gameKey] || GAME_META.beerpong;
+
+      roundLabel.textContent = `Round ${round} of 5`;
+      gameLogo.src = game.logo;
+      gameLogo.alt = game.label;
+    }
+
+    function allSubmitted() {
+      const players = Object.values(playersMap);
+      if (!players.length) return false;
+      return players.every(player => player.currentSelectionSubmitted === true);
+    }
+
+    async function goToPicks() {
+      if (transitioned) return;
+      transitioned = true;
+
+      try {
+        await update(ref(db, "lobby"), {
+          phase: "picks"
+        });
+
+        fade.classList.add("show");
+
+        setTimeout(() => {
+          window.location.href = "picks.html";
+        }, 1400);
+      } catch (error) {
+        console.error("Could not transition to picks:", error);
+        transitioned = false;
+      }
+    }
+
+    onValue(ref(db, "lobby"), snapshot => {
+      lobbyState = snapshot.val() || {};
+      renderGame();
+
+      if (lobbyState.phase === "picks") {
+        window.location.href = "picks.html";
+      }
+    });
+
+    onValue(ref(db, "lobby/players"), snapshot => {
+      playersMap = snapshot.val() || {};
+      if ((lobbyState.phase || "gameplay") === "gameplay" && allSubmitted()) {
+        goToPicks();
+      }
+    });
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        screen.classList.add("show");
+      });
+    });
+  </script>
+</body>
+</html>

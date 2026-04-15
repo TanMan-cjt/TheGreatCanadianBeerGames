@@ -487,6 +487,8 @@
       updateStartButton();
     });
 
+    const GAME_ORDER = ["beerpong", "pizzabox", "kingscup", "pokerface", "tablefootball"];
+
     startGameButton.addEventListener("click", async () => {
       if (isStarting) return;
 
@@ -503,15 +505,36 @@
       try {
         isStarting = true;
 
-        await update(lobbyRef, {
-          phase: "game1",
-          gameStarted: true
+        const updates = {
+          "lobby/phase": "gameplay",
+          "lobby/currentRound": 1,
+          "lobby/currentGameKey": GAME_ORDER[0],
+          "lobby/gameStarted": true
+        };
+
+        allPlayers.forEach(player => {
+          updates[`lobby/players/${player.id}/currentSelectionTargetId`] = null;
+          updates[`lobby/players/${player.id}/currentSelectionSubmitted`] = false;
+          updates[`lobby/players/${player.id}/currentSelectionRound`] = null;
         });
+
+        captains.forEach(captain => {
+          updates[`lobby/players/${captain.id}/roundScores`] = {
+            1: 0,
+            2: 0,
+            3: 0,
+            4: 0,
+            5: 0
+          };
+          updates[`lobby/players/${captain.id}/totalScore`] = 0;
+        });
+
+        await update(ref(db), updates);
 
         fadeToBlack.classList.add("show");
 
         setTimeout(() => {
-          window.location.href = "game1.html";
+          window.location.href = "game.html";
         }, 2400);
       } catch (error) {
         console.error("Failed to start game:", error);
