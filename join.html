@@ -258,6 +258,11 @@
         status.className = className;
     }
 
+    function clearStatus() {
+        status.textContent = "";
+        status.className = "";
+    }
+
     function getInitial(name) {
         return (name || "?").charAt(0).toUpperCase();
     }
@@ -929,6 +934,10 @@
     function renderGameplayVoting(player, panel) {
         panel.innerHTML = "";
         resetPhoneTheme();
+
+        if (!player.currentSelectionSubmitted) {
+            clearStatus();
+        }
 
         const game = GAME_META[currentLobbyState.currentGameKey] || { label: "Game" };
         const { heading, options, color, layout } = getGameplayOptions(player);
