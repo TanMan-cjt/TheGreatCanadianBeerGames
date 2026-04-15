@@ -1279,14 +1279,13 @@
             return;
             }
         }
-        /*
+
         let playerId = localStorage.getItem("playerId");
         if (!playerId) {
             playerId = generatePlayerId();
             localStorage.setItem("playerId", playerId);
         }
-        */
-        const playerId = generatePlayerId();
+
         await set(ref(db, `lobby/players/${playerId}`), {
             username,
             isCaptain: wantsCaptain,
@@ -1301,8 +1300,8 @@
             joinedAt: Date.now()
         });
 
-        //localStorage.setItem("joinedUsername", username);
-        //localStorage.setItem("joinedIsCaptain", wantsCaptain ? "1" : "0");
+        localStorage.setItem("joinedUsername", username);
+        localStorage.setItem("joinedIsCaptain", wantsCaptain ? "1" : "0");
 
         showJoinedState(username, wantsCaptain);
         setStatus(
@@ -1392,7 +1391,7 @@
     refreshBtn.addEventListener("click", refreshStatus);
     leaveBtn.addEventListener("click", leaveGame);
 
-    //restoreExistingPlayer();
+    restoreExistingPlayer();
     </script>
 </body>
 </html>
